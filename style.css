@@ -28,3 +28,16 @@
 .portrait {
     width: 100%;
 }
+
+body {
+    color: #404040;
+    font-family: "Source Sans Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 20px;
+    line-height: 1.5;
+}
+
+a {
+    color: #aa0505;
+    text-decoration: none;
+    transition: .07s ease-in;
+}
