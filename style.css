@@ -1,0 +1,30 @@
+.centered {
+    text-align: center;
+}
+
+.content-body {
+    padding-left: 10%;
+    padding-right: 10%;
+}
+
+.column {
+    float: left;
+}
+  
+.left {
+    width: 75%;
+}
+
+.right {
+    width: 25%;
+}
+
+.row:after {
+    content: "";
+    display: table;
+    clear: both;
+}
+
+.portrait {
+    width: 100%;
+}
