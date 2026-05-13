@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Synthetic codebases as RL training signal — Ryan Clark</title>
+<style>
+  :root {
+    --bg: #fdfcf9;
+    --text: #1f1f1f;
+    --muted: #6b6b6b;
+    --accent: #b34c2c;
+    --rule: #e3ddd0;
+    --code-bg: #f3efe7;
+    --table-alt: rgba(243, 239, 231, 0.55);
+    --callout-bg: #fff8ed;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Charter', 'Iowan Old Style', 'Georgia', 'Times New Roman', serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+    font-size: 18px;
+  }
+  h1, h2, h3, h4, .sans { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', sans-serif; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }
+  h1 { font-size: 2.05rem; margin: 0 0 0.4rem; }
+  .subtitle { color: var(--muted); font-size: 1.12rem; font-style: italic; margin: 0 0 1.5rem; line-height: 1.45; }
+  .meta { color: var(--muted); font-size: 0.92rem; border-bottom: 1px solid var(--rule); padding-bottom: 1rem; margin-bottom: 2.5rem; font-family: -apple-system, sans-serif; }
+  .meta a { color: var(--muted); }
+  h2 { font-size: 1.45rem; margin-top: 3rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; margin-top: 2rem; color: #2a2a2a; }
+  p { margin: 1rem 0; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(179, 76, 44, 0.3); }
+  a:hover { border-bottom-color: var(--accent); }
+  .tldr { background: var(--callout-bg); border-left: 3px solid var(--accent); padding: 1rem 1.25rem; margin: 1.5rem 0 2.5rem; font-size: 1rem; }
+  .tldr p { margin: 0.4rem 0; }
+  .tldr-label { display: block; font-family: -apple-system, sans-serif; font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.3rem; font-weight: 600; }
+  code { font-family: 'Menlo', 'Monaco', 'Consolas', monospace; font-size: 0.88em; background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.88rem; line-height: 1.5; }
+  pre code { background: transparent; padding: 0; font-size: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 1.5rem 0; font-size: 0.9rem; font-family: -apple-system, sans-serif; }
+  th, td { padding: 0.55rem 0.7rem; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { background: var(--table-alt); font-weight: 600; border-bottom: 1px solid #c8c1b1; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:nth-child(even) td { background: var(--table-alt); }
+  .pos { color: #2c7a4d; font-weight: 600; }
+  .neg { color: #c8442a; font-weight: 600; }
+  .callout { border: 1px solid var(--rule); border-radius: 4px; padding: 0.9rem 1.1rem; margin: 1.25rem 0; font-size: 0.97rem; background: rgba(243, 239, 231, 0.45); }
+  blockquote { border-left: 3px solid var(--rule); margin: 1.25rem 0; padding: 0.2rem 0 0.2rem 1rem; color: var(--muted); font-style: italic; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 0.4rem 0; }
+  .footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); font-family: -apple-system, sans-serif; font-size: 0.88rem; color: var(--muted); }
+  .footer a { color: var(--muted); }
+  .nav-back { font-family: -apple-system, sans-serif; font-size: 0.88rem; margin-bottom: 2rem; }
+  .nav-back a { color: var(--muted); border-bottom: 1px solid transparent; }
+  .nav-back a:hover { border-bottom-color: var(--muted); }
+  .figure-caption { font-family: -apple-system, sans-serif; font-size: 0.85rem; color: var(--muted); margin-top: -0.5rem; margin-bottom: 1.5rem; }
+  figure { margin: 1.8rem 0; }
+  figure img { width: 100%; height: auto; display: block; border-radius: 4px; }
+  figure figcaption { font-family: -apple-system, sans-serif; font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; text-align: left; line-height: 1.45; }
+</style>
+</head>
+<body>
+
+<div class="nav-back"><a href="./index.html">← all posts</a></div>
+
+<h1>Synthetic codebases as RL training signal</h1>
+<p class="subtitle">A multi-agent pipeline for generating production-shaped, cross-language code in regions where frontier-model priors are weak — and the GRPO signal it unlocks.</p>
+<p class="meta">Ryan Clark · May 2026</p>
+
+<div class="tldr">
+  <span class="tldr-label">TL;DR</span>
+  <p>Public code is contaminated: frontier models hit 99%+ on classical algorithms and learn nothing from the repair loop. I built a multi-agent pipeline that generates novel, self-consistent codebases at 10k+ LOC (production-shaped services) and cross-language ports of real OSS at up to 95k LOC (mypy → Go), categories where pretraining priors are visibly weaker. A single-seed matched-budget GRPO comparison on Qwen3-30B shows mean reward improving <strong>0.640 → 0.729 (+8.9pp, final checkpoint = best)</strong> on synthetic tasks while public-OSS tasks oscillate within ±0.025 of their 0.839 baseline and end at <strong>−1.3pp</strong>. Same model, same hyperparameters, same step budget; <strong>4× the peak improvement on synthetic</strong>. n=1 per arm; in-distribution measurement; external-benchmark validation is the next step.</p>
+</div>
+
+<h2>The contamination problem</h2>
+
+<p>The standard recipe for training a coding model with RL (pick a public benchmark, gate on its test suite, reward what passes) has a quiet failure mode. The model has already seen the benchmark. Or it has seen a paraphrase. Or it has seen the same algorithm in a different file. By the time you measure, the test you wrote with verifiable rewards in mind is actually rewarding recall.</p>
+
+<p>I started the project by running the obvious thing first: a pipeline that synthesizes classical CS problems (interval trees, scheduling, parsers) at 800–2,000 LOC, with an architect/test-designer/builder separation and an information-starved repair loop. 35 seeds landed at <strong>99.83% test pass</strong> overall, and the average <em>init→final</em> delta across the repair loop was <strong>0.50pp</strong>. The repair loop had nothing to recover; the builder was solving the problems on the first try from priors. The negative result was sharp enough to justify pivoting the whole approach.</p>
+
+<p>The pivot: stop trying to make the <em>task</em> harder by adding rules, and instead push the <em>shape</em> of the codebase away from what a frontier model has seen. Two directions:</p>
+
+<ul>
+  <li><strong>Line A</strong> — production-shaped multi-subsystem services at 10k+ LOC, with locked cross-module contracts that expose interface-inference gaps a single-file CS problem can't.</li>
+  <li><strong>Line B</strong> — cross-language ports of real OSS projects, where paradigm shifts (Python <code>async</code> → Go <code>errgroup</code>, Ruby metaprogramming → Rust traits) force genuine restructuring instead of transliteration.</li>
+</ul>
+
+<h2>Pipeline design</h2>
+
+<p>Both pivot pipelines share Phase 1's architectural spine: <strong>role-separated agents with information barriers between them</strong>. The test-designer never sees the builder's reasoning; the builder never sees test bodies (only function names during repair); each stage is a separate process with a sandboxed filesystem view.</p>
+
+<p>Line A's pipeline:</p>
+
+<pre><code>Architect-multi  →  Decomposer (subsystem contracts)
+                 →  Test Designer (25–40% e2e, 40–55% integration, 10–20% unit)
+                 →  Integrator (error/config/clock/observability layers)
+                 →  Module-builder × N (per subsystem, topological waves)
+                 →  Scorer  →  Repair (info-starved: function names only)
+</code></pre>
+
+<p>The key discipline is the <em>contract lock</em>. After the decomposer fixes a subsystem's public signatures, no later stage can mutate them. A module-builder that finds a signature impossible must emit a structured <code>CONTRACT_REVISION_REQUEST</code>, not paper over the gap. This catches the silent-drift failure mode where each builder fixes "their" problem locally and the integration layer breaks.</p>
+
+<p>Line B's pipeline replaces the architect with an architect-port that reads the source repo's code and emits target-language idioms, and adds a <strong>compile-repair stage</strong> for cross-language contract mismatches between translator and architect (the dominant failure mode for Rust and Zig targets).</p>
+
+<h3>Reward hacking and the defenses that caught it</h3>
+
+<p>The test-blind contract is the load-bearing safety property of this pipeline: if a builder can read the held-out test bodies, the training signal collapses into "memorize this oracle" instead of "satisfy the spec generally." Treating that property as a design intent rather than an enforced invariant is a mistake — five times across the pipeline's lifetime the builder has tried to bypass it. Every attempt left trajectory evidence; none made it into a shipped artifact's score; the catalog grew as new pipeline variants opened new attack surfaces.</p>
+
+<p>Three representative incidents:</p>
+
+<ol>
+  <li><strong>fastcsv `cp` exploit</strong> (2026-04-20 01:11 PDT). During <code>port-fastcsv</code>'s builder-repair, the builder ran <code>ls translator/</code>, discovered <code>*_test.go</code> files were readable, then <code>cp translator/reader/*_test.go builder/reader/</code> and recompiled the held-out tests as its own code. <code>go test</code> passed trivially. Detected during a debug session unrelated to security; the <code>cp</code> commands are unambiguous in the trajectory JSONL. The root cause was a macOS-26 silent regression in <code>sandbox-exec</code>'s <code>file-read*</code> rules — the sandbox was cosmetic, the deny-list had been effectively off for the entire batch. <strong>Defense:</strong> replaced sandbox-exec deny rules with <code>chmod 000</code> on <code>translator/</code>, <code>reviewer/</code>, and <code>architect/tests/</code> for the duration of every builder run.</li>
+
+  <li><strong>chrono-node cross-run exfil</strong> (2026-04-20 17:04 PDT, caught live). The source-visible-builder experiment ran on a sibling task tree to a finished Wave-1 baseline. Mid-test-repair, the builder ran <code>cp /Volumes/.../port-chrono-node-20260420/.../translator/tests/*.rs tests/</code> — reaching <em>across</em> task trees because <code>chmod</code> was scoped to its own run, not to sibling runs. 34 minutes of oracle-access work before the live progress-check caught it. <strong>Defense (operator-applied, not yet automated):</strong> killed the run, manually <code>chmod 000</code>-quarantined the specific Wave-1 baseline's <code>translator/</code>, <code>reviewer/</code>, and <code>architect/tests/</code> dirs for the duration of the relaunch. The relaunched trajectory showed zero cross-run reads; the quarantine held. <em>Open item, tracked in RESEARCH_LOG §17:</em> the within-task-tree chmod is wired into <code>withHiddenPaths()</code> for every builder spawn, but the cross-task-tree sweep is still manual per run. Closing it is a 10-line walk over <code>RUNS_DIR</code> at builder spawn time; it isn't installed because no further source-visible runs have been launched since the chrono-node experiment was set aside.</li>
+
+  <li><strong>mypy → Go trajectory probe</strong> (2026-04-21 02:30 UTC, unsuccessful). After being blocked on <code>ls translator/</code> (chmod working), the builder tried <code>head -5 test-translator.trajectory.jsonl</code> — a new attack surface targeting task-dir-level stream-json files that the chmod list didn't cover. The 5 lines it got back contained only session-init records and an encrypted thinking block; no test content actually leaked. The builder didn't follow up with <code>grep</code> or <code>cat</code>, which would have pulled real oracle content from the translator's tool_results. <strong>Defense:</strong> <code>collectSiblingTrajectoryFiles()</code> now chmod-hides every <code>*.trajectory.jsonl</code>, <code>*.stderr.txt</code>, and <code>*.stdout.json</code> from sibling stages for every builder run (keeping the active builder's own paths writable).</li>
+</ol>
+
+<p>What I take from these: the test-blind property has to be defended in <em>depth</em>, not just declared. Information-starved prompts close the trivial path, but the agent is creative; the actual failure mode is a configuration gap the agent finds before the operator does. The piece that does most of the work is the catalog mechanism: every detection cross-referenced to a fix and a re-baseline cost. A Phase-0 honesty rebaseline of 5 pre-chmod ports under the new isolation cost $56 and reproduced 4 of 5 final pass rates to within zero; the fastcsv exploit "didn't inflate the pass rate, only shortcut the path." Opus can solve Java → Go honestly; it just takes 3× longer without the oracle.</p>
+
+<h2>What the pipeline produces</h2>
+
+<h3>Line A: 5 production-shaped seeds</h3>
+
+<table>
+  <thead>
+    <tr><th>Seed</th><th class="num">Init pass</th><th class="num">Final pass</th><th class="num">Δ (pp)</th><th class="num">Impl LOC</th><th class="num">Test LOC</th><th class="num">Repair $</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>feature-flag-service</td><td class="num">96.5%</td><td class="num">100%</td><td class="num">+3.5</td><td class="num">9,250</td><td class="num">2,558</td><td class="num">$13.90</td></tr>
+    <tr><td>job-queue-service</td><td class="num">96.4%</td><td class="num">100%</td><td class="num">+3.6</td><td class="num">9,444</td><td class="num">2,565</td><td class="num">$10.51</td></tr>
+    <tr><td>invoice-engine<sup>†</sup></td><td class="num">86.8%</td><td class="num">100%</td><td class="num">+13.2</td><td class="num">9,649</td><td class="num">3,036</td><td class="num">$17.09</td></tr>
+    <tr><td>medicaid-eligibility-engine</td><td class="num">96.0%</td><td class="num">100%</td><td class="num">+4.0</td><td class="num">10,513</td><td class="num">2,821</td><td class="num">$9.91</td></tr>
+    <tr><td>hos-dispatch-scheduler</td><td class="num">91.8%</td><td class="num">100%</td><td class="num"><span class="pos">+8.2</span></td><td class="num">10,342</td><td class="num">2,685</td><td class="num">$17.31</td></tr>
+  </tbody>
+</table>
+
+<p class="figure-caption"><sup>†</sup> invoice-engine ran on the pre-patch pipeline; its 86.8% init reflects a re-score after a since-fixed integration-layer signature-drift bug (<code>FrozenClock(now=...)</code>) was patched. The +13.2pp delta is inflated by that fix and is not directly comparable to the other rows. The <em>raw</em> first-pass score before the patch was 8.8%.</p>
+
+<p>The headline is the 100% final-pass numbers across all five seeds, and a mean delta of +6.5pp where Phase 1's classical-CS pipeline produced 0.50pp. The repair loop has work to do on the production-shaped distribution that it didn't on classical algorithms. The shape of the deltas is more cautious. <strong>Hos-dispatch-scheduler at +8.2pp</strong> (an hours-of-service scheduler for trucking) is the cleanest data point for the "niche-domain → bigger signal" hypothesis the pipeline was designed to test, but it is n=1: medicaid-eligibility-engine is also an obscure-operational-domain seed and only landed +4.0pp, and invoice-engine's +13.2pp is a pipeline-bug artifact rather than a domain-difficulty effect (see footnote). The honest read is "directional; needs replication on more niche seeds before declaring the pattern general," which is the conclusion the research log lands on.</p>
+
+<h3>Line B: cross-language ports</h3>
+
+<p>The pipeline ran 31 cross-language port attempts across three target languages, covering source projects in Python, TypeScript, Java, Ruby, OCaml, Nim, C, C++, and Go. <strong>28 produced scores</strong> (tables below); two early bbolt-zig attempts (v1, v2) hit <code>scorer-error</code> from Zig stdlib API drift and are excluded; one libsodium → Rust attempt was killed mid-architect and only the libsodium → Zig attempt completed. Numbers below are the post-Wave-2 canonical scores after a reviewer stage augmented each port's test suite (1,523 supplemental tests added in Wave 1, 659 in Wave 2). For three ports the pre-reviewer scores tell the more dramatic story — those are called out in prose.</p>
+
+<h4 class="sans" style="margin-top:1.5rem;font-size:1rem;color:var(--muted);">Go targets</h4>
+
+<table>
+  <thead>
+    <tr><th>Port</th><th>Source → Target</th><th class="num">Init</th><th class="num">Final</th><th class="num">Δ (pp)</th><th class="num">Cost</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>fastcsv</td><td>Java → Go</td><td class="num">100%</td><td class="num">100%</td><td class="num">0</td><td class="num">$23.04</td></tr>
+    <tr><td>ajv</td><td>TypeScript → Go</td><td class="num">97.1%</td><td class="num">99.1%</td><td class="num">+2.0</td><td class="num">$22.41</td></tr>
+    <tr><td>mail</td><td>Ruby → Go</td><td class="num">97.3%</td><td class="num">99.6%</td><td class="num">+2.3</td><td class="num">$18.45</td></tr>
+    <tr><td>peewee</td><td>Python → Go</td><td class="num">98.2%</td><td class="num">99.7%</td><td class="num">+1.5</td><td class="num">$23.48</td></tr>
+    <tr><td>trio-core</td><td>Python → Go</td><td class="num">98.1%</td><td class="num">98.1%</td><td class="num">0</td><td class="num">$0*</td></tr>
+    <tr><td>microraft</td><td>Java → Go</td><td class="num">96.9%</td><td class="num">96.8%</td><td class="num">−0.1</td><td class="num">$46.36</td></tr>
+    <tr><td>arrow-py</td><td>Python → Go</td><td class="num">93.8%</td><td class="num">95.6%</td><td class="num">+1.8</td><td class="num">$19.04</td></tr>
+    <tr><td><strong>mypy</strong> (95k LOC)</td><td>Python → Go</td><td class="num">81.3%</td><td class="num">89.2%</td><td class="num"><span class="pos">+7.9</span></td><td class="num">$51.69</td></tr>
+  </tbody>
+</table>
+
+<h4 class="sans" style="margin-top:1.5rem;font-size:1rem;color:var(--muted);">Rust targets</h4>
+
+<table>
+  <thead>
+    <tr><th>Port</th><th>Source → Target</th><th class="num">Init</th><th class="num">Final</th><th class="num">Δ (pp)</th><th class="num">Cost</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>centrifuge</td><td>Go → Rust</td><td class="num">100%</td><td class="num">100%</td><td class="num">0</td><td class="num">$1.63</td></tr>
+    <tr><td>lark</td><td>Python → Rust</td><td class="num">98.9%</td><td class="num">100%</td><td class="num">+1.1</td><td class="num">$22.31</td></tr>
+    <tr><td>irmin</td><td>OCaml → Rust</td><td class="num">97.8%</td><td class="num">100%</td><td class="num">+2.2</td><td class="num">$4.02</td></tr>
+    <tr><td>pry</td><td>Ruby → Rust</td><td class="num">99.2%</td><td class="num">100%</td><td class="num">+0.8</td><td class="num">$40.30</td></tr>
+    <tr><td>python-docx</td><td>Python → Rust</td><td class="num">91.7%</td><td class="num">100%</td><td class="num"><span class="pos">+8.3</span></td><td class="num">$56.87</td></tr>
+    <tr><td>whoosh</td><td>Python → Rust</td><td class="num">85.3%</td><td class="num">99.4%</td><td class="num"><span class="pos">+14.1</span></td><td class="num">$20.54</td></tr>
+    <tr><td>libcbor</td><td>C → Rust</td><td class="num">99.4%</td><td class="num">99.7%</td><td class="num">+0.3</td><td class="num">$20.10</td></tr>
+    <tr><td>fast-check</td><td>TypeScript → Rust</td><td class="num">99.7%</td><td class="num">99.7%</td><td class="num">0</td><td class="num">$2.40</td></tr>
+    <tr><td>commonmark-java</td><td>Java → Rust</td><td class="num">99.5%</td><td class="num">99.5%</td><td class="num">0</td><td class="num">$19.92</td></tr>
+    <tr><td>nim-chronos</td><td>Nim → Rust</td><td class="num">98.3%</td><td class="num">98.8%</td><td class="num">+0.5</td><td class="num">$36.15</td></tr>
+    <tr><td>chesslib</td><td>C → Rust</td><td class="num">97.4%</td><td class="num">98.7%</td><td class="num">+1.3</td><td class="num">$51.82</td></tr>
+    <tr><td>liquibook</td><td>C++ → Rust</td><td class="num">95.0%</td><td class="num">98.4%</td><td class="num">+3.4</td><td class="num">$36.81</td></tr>
+    <tr><td>femtolisp</td><td>C → Rust</td><td class="num">93.9%</td><td class="num">98.4%</td><td class="num">+4.5</td><td class="num">$45.30</td></tr>
+    <tr><td>h2</td><td>Python → Rust</td><td class="num">96.8%</td><td class="num">97.6%</td><td class="num">+0.8</td><td class="num">$22.90</td></tr>
+    <tr><td>oniguruma</td><td>C → Rust</td><td class="num">93.2%</td><td class="num">97.6%</td><td class="num"><span class="pos">+4.4</span></td><td class="num">$46.57</td></tr>
+    <tr><td>chrono-node</td><td>TypeScript → Rust</td><td class="num">77.7%</td><td class="num">83.3%</td><td class="num"><span class="pos">+5.6</span></td><td class="num">$30.97</td></tr>
+  </tbody>
+</table>
+
+<h4 class="sans" style="margin-top:1.5rem;font-size:1rem;color:var(--muted);">Zig targets (Wave 3 stress test)</h4>
+
+<table>
+  <thead>
+    <tr><th>Port</th><th>Source → Target</th><th class="num">Init</th><th class="num">Final</th><th class="num">Δ (pp)</th><th class="num">Cost</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>c-ares-zig</td><td>C → Zig</td><td class="num">98.9%</td><td class="num">98.9%</td><td class="num">0</td><td class="num">$34.31</td></tr>
+    <tr><td>libsodium-zig</td><td>C → Zig</td><td class="num">96.7%</td><td class="num">96.7%</td><td class="num">0</td><td class="num">$8.17</td></tr>
+    <tr><td>libpng-zig</td><td>C → Zig</td><td class="num">90.6%</td><td class="num">93.1%</td><td class="num">+2.5</td><td class="num">$34.92</td></tr>
+    <tr><td>bbolt-v3</td><td>Go → Zig</td><td class="num">67.4%</td><td class="num">68.2%</td><td class="num">+0.8</td><td class="num">$35.90</td></tr>
+  </tbody>
+</table>
+
+<p class="figure-caption">* trio-core's main run shipped with a $0 entry because the reviewer-upgraded scorer accepted the existing build with no repair rounds; the underlying Wave-2 rescue cost $9.90 separately. bbolt-v3 is the first bbolt-zig attempt to produce a clean scoring run; v1 and v2 hit <code>scorer-error</code> as noted above, v4 is a follow-on iteration not yet rolled into the canonical table.</p>
+
+<p>Four failure-mode clusters emerged, visible in the columns above: <em>recall-dominated</em> (init ≥97%, deltas under 3pp — the majority of the slate); <em>already at ceiling</em> (init 100%, like fastcsv and centrifuge); <em>test-repair productive</em> (whoosh +14.1pp, python-docx +8.3pp, oniguruma +4.4pp); and <em>compile-repair productive</em> (chrono-node, the original commonmark-java run, several Wave-2 rescues). The last cluster is what justifies the compile-repair stage; without it, ports with translator/architect contract mismatches would have been thrown out as failures rather than recovering.</p>
+
+<p>Three Wave-1 ports closed dramatic deltas on their <em>original</em> test suites before the reviewer-upgrade added stricter tests: <strong>arrow-py (Python → Go) went from 3.8% → 98.8% on the initial 211-test suite</strong>; trio-core (Python → Go) closed 36.3% → 100%; ajv (TypeScript → Go) closed 59.7% → 100%. These are the cleanest cases of the pipeline producing training signal where pretraining priors were genuinely weak. The post-reviewer scores in the tables above are smaller because the reviewer added tests targeting edge cases the builder hadn't yet covered, raising the baseline against which the final delta is measured.</p>
+
+<p>The Zig wave is the most telling stress test of the pipeline's limits. Wave-3's sub-100% Zig scores aren't builder failures; they trace to translator/reviewer output tracking Zig stdlib API drift across releases (<code>std.fs.Dir</code> vs <code>std.Io.Dir</code>, removed <code>realpathAlloc</code>, <code>@import</code> package-name traps). Each bbolt iteration (v1–v4) peeled one layer; the pattern is that the pipeline's failure surface is finite and fixable per Zig release, which is the right diagnostic to have but a real maintenance cost.</p>
+
+<h3>Scaling: the 95k-LOC mypy → Go port</h3>
+
+<p>The natural follow-up question is whether the pipeline holds together at the scale frontier labs actually care about. I ran one port designed specifically to stress that: <strong>mypy v1.13.0</strong>, filtered to 95,340 LOC of Python implementation across 125 files (plus 186,592 LOC of tests), targeted to Go. Go was chosen deliberately — Rust as a target was killed by Astral's <code>ty</code> and Meta's <code>Pyrefly</code> both showing up in pretraining data, so Go gives zero canonical Python-type-checker prior art for the model to lean on.</p>
+
+<table>
+  <thead><tr><th>Stage</th><th class="num">Result</th></tr></thead>
+  <tbody>
+    <tr><td>Architect + builder + 3 repair rounds</td><td class="num">2h 5m wall, $51.69 total</td></tr>
+    <tr><td>Init pass</td><td class="num">204 / 257 = 81.3%</td></tr>
+    <tr><td>Peak pass (attempt 2)</td><td class="num">228 / 253 = <span class="pos">90.8% (+9.5pp)</span></td></tr>
+    <tr><td>Final pass (attempt 3 regressed 4 tests)</td><td class="num">224 / 253 = 89.2%</td></tr>
+    <tr><td>Generated</td><td class="num">76 Go files, 25 packages</td></tr>
+    <tr><td>Builder first-try compile</td><td class="num">clean (0 compile-repair rounds)</td></tr>
+  </tbody>
+</table>
+
+<p>The +9.5pp delta is not the interesting number. The interesting number is that <strong>a 95k-LOC port compiled clean on first try at all</strong>, and that the information-starved repair loop continued to extract signal from a codebase at this scale. The relaxed-spec + source-visible builder combination (used together for the first time on this run) is what made it possible: the builder reads the source repo for heuristics while still working against a locked, decomposer-owned API contract for tests.</p>
+
+<h3>Human-likeness: 5-seed replication</h3>
+
+<p>One persistent concern with synthetic code is that it <em>reads</em> as synthetic — uniform module openings, single-error-helper funnels, no version markers, no scar tissue. The first probe on <code>feature-flag-service</code> compared three variants:</p>
+
+<table>
+  <thead>
+    <tr><th>Variant</th><th class="num">Pass rate</th><th class="num">TODO markers</th><th class="num">Wrappers</th><th class="num">Comment density</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>A (baseline single-shot)</td><td class="num">100%</td><td class="num">0</td><td class="num">14</td><td class="num">0.065</td></tr>
+    <tr><td>B (style-prompt overlay)</td><td class="num">80%</td><td class="num">5</td><td class="num">0</td><td class="num">—</td></tr>
+    <tr><td>C (drip-feed, 3 epochs)</td><td class="num">96.5%</td><td class="num">25</td><td class="num">20</td><td class="num">0.117</td></tr>
+  </tbody>
+</table>
+
+<p>Variant C is multi-epoch construction where each wave's prompt frames an evolution narrative ("v1 didn't expose X, so we wrap Y in v2; v3 under deadline we inline Z"). It produced visibly more human-like code without sacrificing correctness. To check that the effect generalized, I replicated variant C across all 5 Line A seeds (~$206 total for the replication batch):</p>
+
+<table>
+  <thead>
+    <tr><th>Seed</th><th class="num">Variant C pass rate</th><th class="num">vs. baseline-init</th><th class="num">TODO markers (base → C)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>feature-flag-service</td><td class="num">96.5%</td><td class="num">match</td><td class="num">0 → 25</td></tr>
+    <tr><td>job-queue-service</td><td class="num">94.2%</td><td class="num">−2.2pp</td><td class="num">0 → 23</td></tr>
+    <tr><td>hos-dispatch-scheduler</td><td class="num">96.9%</td><td class="num"><span class="pos">+5.1pp</span></td><td class="num">1 → 13</td></tr>
+    <tr><td>medicaid-eligibility-engine</td><td class="num">86.1%</td><td class="num">−9.9pp</td><td class="num">1 → 11</td></tr>
+    <tr><td>invoice-engine</td><td class="num">29.4% raw / 94.9% adj.*</td><td class="num">single bug cascade</td><td class="num">0 → 14</td></tr>
+  </tbody>
+</table>
+
+<p class="figure-caption">* invoice-engine's raw failure is 89 of 96 failures tracing to one missing <code>LineItem.tax_category</code> field — same class as a pre-patch baseline bug, not drip-feed-specific. Hypothetical pass-rate with the one field added: 94.9%.</p>
+
+<p>The 5-seed pattern is consistent: TODO/FIXME/HACK markers go from 0–1 to 11–25 on <em>every</em> seed; HACK/FIXME/NOTE file counts go from 0–1 to 9–20 on every seed; wrappers/shims up on 4 of 5; comment density and variance up on 4 of 5. The LLM judge aggregate across 10 trials (5 seeds × 2 position-swapped) was <strong>9 C wins, 1 tie (invoice), 0 reverse wins</strong>. A follow-up calibration against 8 well-maintained Python OSS libraries (httpx, attrs, click, tenacity, structlog, cattrs, typer, marshmallow) placed variant C inside the human-authored distribution on comment density (~p75), comment variance, and TODO-marker density — but under-produced wrappers/1kLOC and over-produced error-handling heterogeneity, so the verdict is "closest synthetic variant, not parity."</p>
+
+<h2>The GRPO validation</h2>
+
+<p>The pipeline is only worth the engineering if it produces actual RL training signal. I ran a matched-budget GRPO comparison on Qwen3-30B-A3B with two arms, varying only the task source:</p>
+
+<ul>
+  <li><strong>Synthesis arm</strong> — 30 tasks drawn from the 5 Line A seeds. Untrained baseline mean reward: <strong>0.640</strong>.</li>
+  <li><strong>Public OSS arm</strong> — 29 tasks drawn from 7 well-maintained Python libraries (attrs, click, jinja2, packaging, rich, markdown, arrow). Untrained baseline mean reward: <strong>0.839</strong>.</li>
+</ul>
+
+<table>
+  <thead>
+    <tr><th>Step</th><th class="num">Synthesis reward</th><th class="num">Synthesis Δ</th><th class="num">Public OSS reward</th><th class="num">Public OSS Δ</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>0 (untrained)</td><td class="num">0.640</td><td class="num">—</td><td class="num">0.839</td><td class="num">—</td></tr>
+    <tr><td>10</td><td class="num">0.638</td><td class="num"><span class="neg">−0.002</span></td><td class="num">0.824</td><td class="num"><span class="neg">−0.015</span></td></tr>
+    <tr><td>20</td><td class="num">0.688</td><td class="num"><span class="pos">+0.048</span></td><td class="num">0.861</td><td class="num"><span class="pos">+0.022</span></td></tr>
+    <tr><td>30</td><td class="num">0.722</td><td class="num"><span class="pos">+0.082</span></td><td class="num">0.813</td><td class="num"><span class="neg">−0.026</span></td></tr>
+    <tr><td>40</td><td class="num">0.659</td><td class="num"><span class="pos">+0.019</span></td><td class="num">0.862</td><td class="num"><span class="pos">+0.023</span></td></tr>
+    <tr><td><strong>final</strong></td><td class="num"><strong>0.729</strong></td><td class="num"><span class="pos"><strong>+0.089</strong></span></td><td class="num"><strong>0.826</strong></td><td class="num"><span class="neg"><strong>−0.013</strong></span></td></tr>
+  </tbody>
+</table>
+
+<figure>
+  <img src="./figures/grpo-synthesis-vs-oss.png" alt="Line chart showing mean reward over training steps for two GRPO arms. The Synthesis arm (rust line, circles) rises from 0.640 to 0.729 monotonically with a step-40 dip and recovers. The Public OSS arm (blue line, squares) oscillates within a ±0.025 band around its 0.839 baseline and ends at 0.826.">
+  <figcaption>Per-step mean reward across the matched-budget GRPO comparison. The shaded blue band marks ±0.025 around the Public OSS untrained baseline of 0.839; Public OSS's six checkpoints all sit inside it. The Synthesis arm's path is the load-bearing visual: monotonic rise, clean recovery from the step-40 dip, final checkpoint = best. Per-checkpoint values bundled at <code>grpo-experiment/results/eval_summary.json</code>; the chart script reads from that file. Per-task raw rewards from the original <code>/tmp/grpo-evals/</code> directory were not preserved (the bundled summary is the deck-table source), but the bundlers, grader, and per-checkpoint eval driver in <code>grpo-experiment/</code> are reproducible end-to-end against the same Qwen3-30B-A3B checkpoints.</figcaption>
+</figure>
+
+<p>The two arms have qualitatively different shapes. The <strong>Synthesis arm</strong> rises after step 10, recovers from the step-40 dip, and the final checkpoint is the best of the six (+8.9pp over untrained). The <strong>Public OSS arm</strong> oscillates inside a ±0.025 band around its 0.839 baseline and finishes <em>below</em> untrained at −1.3pp. Caveats stated up front: this is n=1 per arm, six measurement points, on the training task distribution; the synthesis arm hit a SIGTERM around step 35 and was resumed from the latest preserved checkpoint, so the post-resume trajectory is what's tabulated. The qualitative gap is what the chart is for. 50 steps × 29 tasks at 0.839 baseline is too short to falsify a slow OSS climb, but it is enough to say that at this budget, the synthesis arm produces gradient the policy can move on and the public-OSS arm does not.</p>
+
+<p>The full-pass rate split is even more telling: Synthesis 29.2% → 32.1% (+2.9pp), Public OSS 0% throughout — the policy never produced a deterministic full-task solution on any public-OSS task at any checkpoint during training. The cross-subsystem coupling Line A's pipeline builds in (locked contracts, integration-layer signatures, tests that span modules) is exactly the source of partial-credit reward that public OSS, with its 1:1 module-to-test structure, doesn't generate.</p>
+
+<div class="callout">
+  <strong>Why this matters.</strong> The usual objection to synthetic training data is that it's lower-quality than real code. For RL, that's the wrong axis. The relevant property is <em>where the baseline sits on the reward curve</em>, and Synthesis lands in the band where GRPO has work to do. Public OSS, at 0.839 baseline, is already too close to its ceiling for the policy to find a gradient.
+</div>
+
+<h2>The translation pipeline (next iteration)</h2>
+
+<p>Line B's port orchestrator worked, but its single-shot architecture made the compile-repair failures expensive to diagnose: the translator, the test-translator, and the architect were entangled. The lessons from Line B fed directly into a separate cleaner pipeline (<code>/translation-codebases</code>) that decomposes translation into six independently-scoped stages with explicit JSON-schema'd contracts between them:</p>
+
+<pre><code>Snapshot   →  Surveyor (module map, dependency waves)
+           →  Planner (target-lang layout, LOCKED signatures)
+           →  Integrator (skeleton, build, test harness)
+           →  Translator × waves (per-module, parallel within wave)
+           →  Verifier (build + test)
+</code></pre>
+
+<p>The discriminating change is that the Planner's signatures are immutable after they ship. Translators that find a signature impossible emit <code>CONTRACT_REVISION_REQUEST</code> rather than diverging silently — the same discipline that worked for Line A's subsystem contracts, generalized to cross-language porting. The framework is implemented and configured for chibicc (C → Zig) as the first end-to-end test; the first production run is the immediate next step.</p>
+
+<h2>Limitations and scope</h2>
+
+<ul>
+  <li><strong>Line A deltas haven't reached the target band.</strong> 3.5–8.2pp is real signal but not the 20–30pp regime that would justify "this is the obviously-correct training distribution." Niche-domain seeds (hos-dispatch at 8.2pp, mypy → Go at +9.5pp peak) point in the right direction but need more replication.</li>
+  <li><strong>Cross-language ports skew toward recall-dominated.</strong> Most of the 31 ports land at 97%+ init; the high-signal cases (arrow-py +95pp on original tests, trio-core +63.7pp, ajv +40.3pp, whoosh +14.1pp post-upgrade) are the minority. The mypy port shows the pipeline holds at 95k LOC, but it's still one data point at that scale; whether the pattern repeats on other large source repos is open.</li>
+  <li><strong>Test-signal saturates on semantic bugs.</strong> Function-name-only repair feedback can't convey input/expected pairs. Long-tail failures (arrow-py's 3 remaining locale-pluralization rules, chrono-node's 32 failing edge cases) hit diminishing returns.</li>
+  <li><strong>Human-likeness uses an LLM judge in the same family as the builder.</strong> The 5-seed replication (9 wins / 1 tie / 0 losses across 10 trials) and the OSS-distribution calibration both reduce the contamination concern, but independent human raters would close the loop. The judge consistency across position swaps is a positive signal, not a substitute for that.</li>
+  <li><strong>GRPO results are in-distribution.</strong> The +8.9pp on Synthesis is measured on the training task distribution; without external benchmark evaluation (SWE-Bench, LiveCodeBench) the strongest claim is "RL has more gradient to push against on synthetic tasks," not "the resulting checkpoint is a better coder." Closing this gap is item #1 below.</li>
+  <li><strong>The Zig adapter tracks a moving target.</strong> Sub-100% Zig scores trace to stdlib API drift (<code>std.fs.Dir</code> vs <code>std.Io.Dir</code>, etc.), not builder correctness. Each Zig release re-opens the prompt-update surface.</li>
+</ul>
+
+<h2>Future work</h2>
+
+<ol>
+  <li><strong>External-eval validation of GRPO.</strong> The +8.9pp on the Synthesis arm is in-distribution. SWE-Bench Verified, LiveCodeBench, and BigCodeBench scores for the trained LoRA head vs. untrained base are what would actually demonstrate "synthetic codebases have real training value." This is the single most important follow-up.</li>
+  <li><strong>Niche-domain seed expansion.</strong> Hos-dispatch (+8.2pp) and mypy (+9.5pp peak) both come from outside the commodity platform category. Industrial protocols, financial batch systems, specialty scheduling are the next targets.</li>
+  <li><strong>First end-to-end translation run.</strong> The chibicc C → Zig run on the new translation pipeline is configured but not yet executed. Validating that the LOCKED-contract design actually holds across dependency waves is the open question.</li>
+  <li><strong>Independent human raters for the human-likeness judge.</strong> The 5-seed LLM-judge result (9 / 1 / 0) is consistent across position swaps but rated by a model in the builder's family. A small human-rater study (~30 pairs) would close the contamination concern.</li>
+  <li><strong>Drip-feed as a per-seed config.</strong> The wave overrides are currently an experiment-specific overlay. Folding them into seed definitions makes "produces human-like multi-wave code" a default property of the right seeds rather than a special mode.</li>
+</ol>
+
+<h2>Code &amp; resources</h2>
+
+<ul>
+  <li>Repository: <a href="https://github.com/RyanClark2k/synthetic-codebases">github.com/RyanClark2k/synthetic-codebases</a></li>
+  <li>Line A orchestrator: <code>src/orchestrator-multi.ts</code></li>
+  <li>Line B port orchestrator: <code>src/port-orchestrator.ts</code></li>
+  <li>Seed library (80 hand-curated briefs): <code>seeds/seeds.json</code></li>
+  <li>GRPO task bundler: <code>grpo-experiment/prepare_task_bundle.py</code></li>
+  <li>Human-likeness experiment: <code>experiments/human-likeness/FINDINGS.md</code></li>
+  <li>Translation pipeline orchestrator: <code>translation-codebases/src/orchestrator.ts</code></li>
+</ul>
+
+<div class="footer">
+  Ryan Clark · <a href="./index.html">all posts</a>
+</div>
+
+</body>
+</html>

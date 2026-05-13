@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RNAmin-RLVR: RNA inverse folding as a verifiable reward — Ryan Clark</title>
+<style>
+  :root {
+    --bg: #fdfcf9;
+    --text: #1f1f1f;
+    --muted: #6b6b6b;
+    --accent: #b34c2c;
+    --rule: #e3ddd0;
+    --code-bg: #f3efe7;
+    --table-alt: rgba(243, 239, 231, 0.55);
+    --callout-bg: #fff8ed;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Charter', 'Iowan Old Style', 'Georgia', 'Times New Roman', serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+    font-size: 18px;
+  }
+  h1, h2, h3, h4, .sans { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', sans-serif; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }
+  h1 { font-size: 2.05rem; margin: 0 0 0.4rem; }
+  .subtitle { color: var(--muted); font-size: 1.12rem; font-style: italic; margin: 0 0 1.5rem; line-height: 1.45; }
+  .meta { color: var(--muted); font-size: 0.92rem; border-bottom: 1px solid var(--rule); padding-bottom: 1rem; margin-bottom: 2.5rem; font-family: -apple-system, sans-serif; }
+  h2 { font-size: 1.45rem; margin-top: 3rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; margin-top: 2rem; color: #2a2a2a; }
+  p { margin: 1rem 0; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(179, 76, 44, 0.3); }
+  a:hover { border-bottom-color: var(--accent); }
+  .tldr { background: var(--callout-bg); border-left: 3px solid var(--accent); padding: 1rem 1.25rem; margin: 1.5rem 0 2.5rem; font-size: 1rem; }
+  .tldr p { margin: 0.4rem 0; }
+  .tldr-label { display: block; font-family: -apple-system, sans-serif; font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.3rem; font-weight: 600; }
+  code { font-family: 'Menlo', 'Monaco', 'Consolas', monospace; font-size: 0.88em; background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.88rem; line-height: 1.5; }
+  pre code { background: transparent; padding: 0; font-size: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 1.5rem 0; font-size: 0.9rem; font-family: -apple-system, sans-serif; }
+  th, td { padding: 0.55rem 0.7rem; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { background: var(--table-alt); font-weight: 600; border-bottom: 1px solid #c8c1b1; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:nth-child(even) td { background: var(--table-alt); }
+  .pos { color: #2c7a4d; font-weight: 600; }
+  .neg { color: #c8442a; font-weight: 600; }
+  .callout { border: 1px solid var(--rule); border-radius: 4px; padding: 0.9rem 1.1rem; margin: 1.25rem 0; font-size: 0.97rem; background: rgba(243, 239, 231, 0.45); }
+  blockquote { border-left: 3px solid var(--rule); margin: 1.25rem 0; padding: 0.2rem 0 0.2rem 1rem; color: var(--muted); font-style: italic; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 0.4rem 0; }
+  .footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); font-family: -apple-system, sans-serif; font-size: 0.88rem; color: var(--muted); }
+  .footer a { color: var(--muted); }
+  .nav-back { font-family: -apple-system, sans-serif; font-size: 0.88rem; margin-bottom: 2rem; }
+  .nav-back a { color: var(--muted); border-bottom: 1px solid transparent; }
+  .nav-back a:hover { border-bottom-color: var(--muted); }
+  figure { margin: 1.8rem 0; }
+  figure img { width: 100%; height: auto; display: block; border-radius: 4px; }
+  figure figcaption { font-family: -apple-system, sans-serif; font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; text-align: left; line-height: 1.45; }
+</style>
+</head>
+<body>
+
+<div class="nav-back"><a href="./index.html">← all posts</a></div>
+
+<h1>RNAmin-RLVR</h1>
+<p class="subtitle">Testing whether RLVR's structural recipe transfers to a domain with effectively zero pretraining overlap.</p>
+<p class="meta">Ryan Clark · April 2026</p>
+
+<div class="tldr">
+  <span class="tldr-label">TL;DR</span>
+  <p>I trained Qwen3-4B-Instruct with GRPO to design RNA sequences that fold into target dot-bracket structures, using ViennaRNA as a fast verifier. The in-domain headline is mean structural match <strong>72.9% → 92.7%</strong> (perfect-solve rate <strong>30% → 52%</strong> as the binary check). Cross-domain, the same checkpoint <em>degraded</em> GPQA Diamond by <strong>−4.1pp</strong>, the opposite sign of what a matched <a href="./boolmin-rlvr.html">BoolMin-RLVR run</a> produced (+3.5). Same algorithm, same model, same training budget; the choice of task seems to matter more than the existence of a verifier. n=1 seed per condition; see <a href="#limits">limitations</a>.</p>
+</div>
+
+<table>
+  <thead><tr><th>Benchmark</th><th class="num">Base</th><th class="num">RNA-trained</th><th class="num">BoolMin-trained</th></tr></thead>
+  <tbody>
+    <tr><td>GPQA Diamond</td><td class="num">48.0%</td><td class="num"><span class="neg">43.9% (−4.1)</span></td><td class="num"><span class="pos">51.5% (+3.5)</span></td></tr>
+    <tr><td>MATH-500</td><td class="num">91.0%</td><td class="num">91.2% (+0.2)</td><td class="num">90.4% (−0.6)</td></tr>
+    <tr><td>IFEval (strict)</td><td class="num">84.5%</td><td class="num"><span class="neg">83.0% (−1.5)</span></td><td class="num">84.1% (−0.4)</td></tr>
+    <tr><td>IFEval (loose)</td><td class="num">87.8%</td><td class="num">87.1% (−0.7)</td><td class="num">87.2% (−0.6)</td></tr>
+  </tbody>
+</table>
+<p style="font-size: 0.88rem; color: var(--muted); margin-top: -0.5rem;">Matched-pair zero-shot evaluation. Same base model (Qwen3-4B-Instruct-2507), same algorithm (GRPO via Tinker), same hyperparameters, matched training budget (~150 / ~250 steps; ~$11–15 each). Only the training task varies. n=1 seed per condition.</p>
+
+<h2>The question</h2>
+
+<p>RLVR (reinforcement learning with verifiable rewards) has worked best when the verifier is fast and the task is far from contaminated pretraining data. The existing literature (math reasoning, classical NP problems, code unit tests) clusters in one neighborhood of "discrete CS-flavored problems." It's worth asking whether that neighborhood is doing the work for the method, or incidental.</p>
+
+<p>RNA inverse folding is unusually well-suited as a test:</p>
+
+<ul>
+  <li><strong>Verification is fast.</strong> ViennaRNA's <code>RNAfold</code> evaluates a 100nt sequence in single-digit milliseconds via a well-maintained C library. No LP solver, no simulation, no judge model.</li>
+  <li><strong>Verification is cheap to express.</strong> The task takes a dot-bracket target structure and produces an A/U/G/C sequence; checking is one library call.</li>
+  <li><strong>The task is inverse design, not optimization.</strong> Unlike "minimize this objective," there's no monotonic reward gradient. Most sequences fold into something totally different from the target.</li>
+  <li><strong>Pretraining overlap is plausibly close to zero.</strong> Dot-bracket → nucleotide-sequence mappings are not standard ML content. The model is unlikely to have memorized any of it.</li>
+</ul>
+
+<p>If RLVR produces meaningful in-domain learning on RNA inverse folding, that's a signal that <em>task structure</em> (inverse design + fast verifier) matters more than <em>task content</em> (math, code, biology). If it doesn't, that's evidence the existing successes lean on domain-specific pretraining priors more than the field admits.</p>
+
+<h2>Task design</h2>
+
+<p>The model receives a target secondary structure in dot-bracket notation and must output an RNA sequence whose minimum-free-energy fold matches it:</p>
+
+<pre><code>Target:   ..(((..(((....)))..(((...)))..)))..
+Output:   SEQUENCE = GCUAACGUAUGCAACGUAAGCUUACGGUACCUGCC</code></pre>
+
+<p>Verification folds the output with ViennaRNA at the default temperature and computes a position-by-position match against the target structure. The reward function is layered to give useful gradient on the typical rollout, where most early outputs fold into something unrelated:</p>
+
+<table>
+  <thead><tr><th>Reward tier</th><th>Condition</th><th class="num">Value</th></tr></thead>
+  <tbody>
+    <tr><td>Format bonus</td><td>Parseable output extracted</td><td class="num">0.05</td></tr>
+    <tr><td>Stepping-stone</td><td>Correct length + valid A/U/G/C alphabet</td><td class="num">0.15</td></tr>
+    <tr><td>Partial match</td><td>≥80% positional match (threshold)</td><td class="num">match_frac × 0.9</td></tr>
+    <tr><td>Perfect match</td><td>Exact structural match</td><td class="num">1.0 + stability bonus (≤0.1)</td></tr>
+  </tbody>
+</table>
+
+<p>The 80% positional-match threshold is deliberate: RNA folding is cooperative, so a sequence whose fold matches at 60% of positions isn't "60% correct"; it's essentially random and a different molecule. The stepping-stone reward for length-and-alphabet correctness was essential: without it, ~75% of early rollouts scored 0 and offered no gradient signal.</p>
+
+<h3>Difficulty tiers and data</h3>
+
+<table>
+  <thead><tr><th>Tier</th><th>Length</th><th>Max depth</th><th>Typical structure</th></tr></thead>
+  <tbody>
+    <tr><td>Easy</td><td>20–35 nt</td><td>1–2</td><td>Single hairpin or simple stem-loop</td></tr>
+    <tr><td>Medium</td><td>35–60 nt</td><td>2–3</td><td>2–3 stem-loops, possible internal loops</td></tr>
+    <tr><td>Hard</td><td>60–100 nt</td><td>3–4</td><td>Multi-branch loops, long-range pairing</td></tr>
+    <tr><td>Expert</td><td>100–150 nt</td><td>4+</td><td>Multiple folded domains (eval only)</td></tr>
+  </tbody>
+</table>
+
+<p>Structures are generated on-the-fly by a recursive descent grammar that enforces the biological constraints that matter for foldability: minimum hairpin loop size of 3 nucleotides, minimum stem length of 3 base pairs, balanced parentheses. The evaluation set is two fixed benchmarks: an in-house 400-instance suite (100 per tier through hard) and a 100-instance subset of community Eterna puzzles.</p>
+
+<h2>Training setup</h2>
+
+<ul>
+  <li><strong>Model:</strong> Qwen3-4B-Instruct-2507 (chosen to fit the budget; the instruct base slightly weakens the "RLVR improves reasoning from scratch" framing but doesn't affect the in-domain learning claim).</li>
+  <li><strong>Algorithm:</strong> GRPO via the Tinker SDK, following the same recipe as DeepSeek-R1 and NP-Engine.</li>
+  <li><strong>LoRA rank:</strong> 16. Learning rate 2e-5. KL coefficient 0.01.</li>
+  <li><strong>Batch:</strong> 8 prompts × 4 rollouts = 32 trajectories per step.</li>
+  <li><strong>Steps:</strong> 150 total (50-step trial on easy tier, then a 100-step continuation from that checkpoint). The full 3,500-step curriculum design (easy → easy+medium → all tiers) is in the experiment doc; the 150-step run was the executed pilot.</li>
+  <li><strong>Total spend:</strong> ~$11 for training, separately ~$15 for the in-domain and cross-domain evals.</li>
+  <li><strong>Verification:</strong> ViennaRNA via the Python bindings, called per rollout with a 30s timeout.</li>
+</ul>
+
+<h2>Results</h2>
+
+<p>Evaluated on a 100-instance held-out test set drawn from RNA-Eval:</p>
+
+<table>
+  <thead><tr><th>Metric</th><th class="num">Base (Qwen3-4B-Instruct)</th><th class="num">After RLVR</th><th class="num">Δ</th></tr></thead>
+  <tbody>
+    <tr><td>Perfect solve rate</td><td class="num">30%</td><td class="num">52%</td><td class="num"><span class="pos">+22 pp</span></td></tr>
+    <tr><td>Sequence validity rate</td><td class="num">56%</td><td class="num">57%</td><td class="num">+1 pp</td></tr>
+    <tr><td>Parseable rate</td><td class="num">92%</td><td class="num">98%</td><td class="num"><span class="pos">+6 pp</span></td></tr>
+    <tr><td>Mean structural match</td><td class="num">72.9%</td><td class="num">92.7%</td><td class="num"><span class="pos">+19.8 pp</span></td></tr>
+    <tr><td>Mean reward</td><td class="num">0.608</td><td class="num">0.845</td><td class="num"><span class="pos">+0.237</span></td></tr>
+  </tbody>
+</table>
+
+<figure>
+  <img src="./figures/rna-training-curve.png" alt="Two-panel chart showing the RNA-RLVR training trajectory across 150 cumulative steps. Left panel: mean reward climbs from about 0.55 at step 0 to roughly 0.8 by step 80 and plateaus around 0.78. Right panel: in-domain perfect-fold rate climbs from about 0.2 to roughly 0.4 with high step-to-step variance. A dotted vertical line marks step 50 where training resumed from the trial checkpoint.">
+  <figcaption>150-step in-domain trajectory composed from the trial (steps 0–49) and trial_100 (steps 50–149) logs. Light traces are per-step values; bold lines are 10-step rolling averages. Mean reward climbs cleanly; the perfect-fold rate is noisier per-step (cooperative folding is high-variance), but the rolling average shows the climb that ends at the 52% headline on the held-out eval set.</figcaption>
+</figure>
+
+<p>A few observations are worth pulling out:</p>
+
+<ul>
+  <li>The <strong>mean match</strong> climb (72.9% → 92.7%) tells a different story than the perfect-solve rate. The model learned to produce sequences that fold <em>close to</em> the target, even when not exact. That's a real shift in capability, not an artifact of the threshold.</li>
+  <li><strong>Sequence validity didn't budge.</strong> Both before and after, ~57% of attempts produce a sequence of correct length over the A/U/G/C alphabet. RLVR taught the model to design structurally accurate folds <em>when it generates a valid candidate</em>, not to generate valid candidates more often. That's a useful diagnostic for where future-work effort should go.</li>
+  <li><strong>Parse rate climbed to 98%.</strong> The model learned the output format faster than it learned the task. That's a consistent finding across RLVR work and a reminder that "verifiable" includes the format gate.</li>
+</ul>
+
+<h2>Cross-domain evaluation</h2>
+
+<p>The motivating question (does RLVR on a maximally out-of-distribution domain transfer to general reasoning?) needs the trained checkpoint to be evaluated on standard benchmarks. The same 150-step RNA-trained checkpoint was run zero-shot against the suite I use for the matched <a href="./boolmin-rlvr.html">BoolMin-RLVR experiment</a>:</p>
+
+<table>
+  <thead><tr><th>Benchmark</th><th class="num">Base</th><th class="num">RNA-trained</th><th class="num">Δ</th></tr></thead>
+  <tbody>
+    <tr><td>MATH-500</td><td class="num">91.0%</td><td class="num">91.2%</td><td class="num">+0.2 (flat)</td></tr>
+    <tr><td>GPQA Diamond</td><td class="num">48.0%</td><td class="num">43.9%</td><td class="num"><span class="neg">−4.1</span></td></tr>
+    <tr><td>IFEval (strict)</td><td class="num">84.5%</td><td class="num">83.0%</td><td class="num"><span class="neg">−1.5</span></td></tr>
+    <tr><td>IFEval (loose)</td><td class="num">87.8%</td><td class="num">87.1%</td><td class="num"><span class="neg">−0.7</span></td></tr>
+  </tbody>
+</table>
+
+<p>Graduate-level science reasoning <em>degrades</em> by 4.1 points; instruction-following degrades modestly; math is flat. This is the opposite sign of what the parallel BoolMin-RLVR run produced on the same base model with the same algorithm (BoolMin: GPQA <span class="pos">+3.5</span>). Two RLVR runs, both with strong in-domain learning, both with fast verifiers, opposite transfer signs.</p>
+
+<div class="callout">
+  <strong>What the RNA result actually says.</strong> The straightforward reading is that RLVR's structural properties (fast verifier, exploration, partial reward) don't automatically produce reasoning transfer. The choice of task domain interacts with what the model generalizes to. Boolean logic seems to share something with GPQA-style reasoning (constraint satisfaction, compositional structure) that RNA secondary-structure design doesn't. Disentangling whether that's about <em>task content</em> or about <em>what the model spends rollouts doing</em> is the natural next experiment; see the BoolMin writeup for that thread.
+</div>
+
+<h2>What this contributes</h2>
+
+<p>Two things, with different confidence levels.</p>
+
+<p>The strong claim, well-supported by the data: <strong>RLVR works on a domain with effectively zero pretraining overlap</strong>. In-domain learning is substantial (+22pp perfect solve, +19.8pp mean match) over a 150-step, ~$11 training budget. The reward design (layered stepping-stone → threshold → exact) and the format-robust verifier are reusable patterns for any inverse-design task where most rollouts miss the target.</p>
+
+<p>The weaker, more interesting claim, supported by the comparison with BoolMin: <strong>task choice is load-bearing for reasoning transfer</strong>. Same model, same algorithm, matched training budget. One task transfers positively to graduate-level science reasoning, the other transfers negatively. Whichever direction the field eventually lands on, "find any task with a fast verifier" is too coarse a recipe.</p>
+
+<p>Two methodological pieces are worth keeping:</p>
+
+<ol>
+  <li><strong>The layered reward design.</strong> A binary reward on perfect-fold would have produced near-zero gradient through the early phase of training; the stepping-stone tier (length + alphabet) and the threshold-based partial credit (≥80% match) keep the signal informative without rewarding noise. I'd expect this layout to generalize to any inverse-design task where most candidates miss completely.</li>
+  <li><strong>The output-format robustness in the verifier.</strong> The parser handles three output formats (echo-back, contiguous, and a regex fallback for the longest A/U/G/C stretch). This sounds boring but matters: it cleanly separates "the model didn't learn the task" from "the model produced a sequence in a format the verifier didn't recognize," and it kept early-training rollouts from being penalized for format quirks.</li>
+</ol>
+
+<h2 id="limits">Limitations and scope</h2>
+
+<ul>
+  <li><strong>The instruct base.</strong> Qwen3-4B-Instruct has already been through RL-flavored instruction tuning, so this isn't a clean "RLVR from a base model" demonstration. The in-domain results are unaffected (the model clearly couldn't design RNA sequences before), but a claim like "this is what RLVR alone produces" would need a pure base model.</li>
+  <li><strong>Single seed, no error bars.</strong> The 30% → 52% improvement is a point estimate on 100 test instances. Variance on a benchmark that size is non-trivial; multi-seed runs are the right way to firm up the claim.</li>
+  <li><strong>Single cross-domain evaluation point.</strong> The −4.1 on GPQA comes from the 150-step endpoint only. The matched BoolMin experiment has cross-domain evals at step 50 <em>and</em> 250, which is what lets it argue against sampling noise from monotonicity. The RNA story would benefit from the same; without a step-50 cross-domain checkpoint, I can't distinguish "the negative grew with training" from "−4.1 was always the level." The 50-step RNA checkpoint exists (<code>tinker://ddd3cc05…</code>); running the cross-domain eval against it is the cheapest tightener.</li>
+  <li><strong>Hard-tier ceiling.</strong> Improvements concentrate in easy and medium tiers; hard-tier instances (60–100nt, depth 3–4) remain mostly out of reach for a 4B model.</li>
+  <li><strong>Validity rate didn't move.</strong> The model still fails to produce a valid candidate ~43% of the time. That's a different bottleneck from structural accuracy and would need a different reward shaping (or a longer training run) to address.</li>
+</ul>
+
+<h2>Future work</h2>
+
+<ol>
+  <li><strong>Disentangle task content from task structure.</strong> The BoolMin/RNA contrast is the most scientifically interesting finding here, and it's currently a comparison of two specific tasks. A shuffled-truth-table control on BoolMin (verifier accepts anything matching the output format) tests whether the algorithm or the task is doing the work. If GPQA still moves on the shuffled control, the structure was the active ingredient; if it doesn't, task content was. Either result is informative.</li>
+  <li><strong>Multi-seed replication of the cross-domain numbers.</strong> The −4.1 on GPQA is a single-seed point estimate on a 198-instance benchmark. Sampling noise at 50% accuracy gives a standard error around ±3.5pp, so one additional seed at the 150-step checkpoint would tell us whether the negative transfer is robust or whether it sits inside the noise floor.</li>
+  <li><strong>Full curriculum execution.</strong> The 3,500-step main run with the 3-phase curriculum is configured but only the 150-step easy-tier pilot has run. Whether hard-tier exposure changes either the in-domain ceiling or the cross-domain sign is open.</li>
+  <li><strong>Validity-rate reward shaping.</strong> Sequence-validity rate didn't move from 56% → 57% — the model still fails to produce a valid candidate ~43% of the time. A 2×2 ablation on stepping-stone weight × threshold strictness would identify whether reward shaping or training scale is the bottleneck.</li>
+  <li><strong>Comparison to a domain-specific RNA design model.</strong> ViennaRNA's <code>RNAinverse</code> and modern tools like RNAiFold provide a strong baseline; the gap (or overlap) is informative for whether this LLM is doing something a specialized solver couldn't.</li>
+</ol>
+
+<h2>Code &amp; resources</h2>
+
+<ul>
+  <li>Repository: <a href="https://github.com/RyanClark2k/rlvr-transfer-experiments">github.com/RyanClark2k/rlvr-transfer-experiments</a></li>
+  <li>Reward function and ViennaRNA integration: <code>src/reward/reward_fn.py</code></li>
+  <li>Grammar-based structure generation: <code>src/data/structure_gen.py</code></li>
+  <li>GRPO training loop: <code>src/training/grpo_train.py</code></li>
+  <li>In-domain evaluation results: <code>results/eval_indomain/</code></li>
+  <li>Experiment design doc: <code>experiment.md</code></li>
+</ul>
+
+<div class="footer">
+  Ryan Clark · <a href="./index.html">all posts</a> · companion experiment: <a href="./boolmin-rlvr.html">BoolMin-RLVR</a>
+</div>
+
+</body>
+</html>
