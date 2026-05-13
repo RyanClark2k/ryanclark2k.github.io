@@ -72,7 +72,7 @@
 
 <div class="tldr">
   <span class="tldr-label">TL;DR</span>
-  <p>I trained Qwen3-4B-Instruct with GRPO to design RNA sequences that fold into target dot-bracket structures, using ViennaRNA as a fast verifier. The in-domain headline is mean structural match <strong>72.9% → 92.7%</strong> (perfect-solve rate <strong>30% → 52%</strong> as the binary check). Cross-domain, the same checkpoint <em>degraded</em> GPQA Diamond by <strong>−4.1pp</strong>, the opposite sign of what a matched <a href="./boolmin-rlvr.html">BoolMin-RLVR run</a> produced (+3.5). Same algorithm, same model, same training budget; the choice of task seems to matter more than the existence of a verifier. n=1 seed per condition; see <a href="#limits">limitations</a>.</p>
+  <p>I trained Qwen3-4B-Instruct with GRPO to design RNA sequences that fold into target dot-bracket structures, using ViennaRNA as a fast verifier. In-domain, mean structural match climbed <strong>72.9% → 92.7%</strong> (perfect-solve rate <strong>30% → 52%</strong> as the binary check). Cross-domain, the same checkpoint <em>degraded</em> GPQA Diamond by <strong>−4.1pp</strong>, the opposite sign of what a matched <a href="./boolmin-rlvr.html">BoolMin-RLVR run</a> produced (+3.5). The algorithm, base model, and training budget are matched to the BoolMin run; the task is the only variable. The choice of task seems to matter more than the existence of a verifier. n=1 seed per condition; see <a href="#limits">caveats</a>.</p>
 </div>
 
 <table>
@@ -88,7 +88,7 @@
 
 <h2>The question</h2>
 
-<p>RLVR (reinforcement learning with verifiable rewards) has worked best when the verifier is fast and the task is far from contaminated pretraining data. The existing literature (math reasoning, classical NP problems, code unit tests) clusters in one neighborhood of "discrete CS-flavored problems." It's worth asking whether that neighborhood is doing the work for the method, or incidental.</p>
+<p>RLVR (reinforcement learning with verifiable rewards) has worked best when the verifier is fast and the task is far from contaminated pretraining data. The existing literature (math reasoning, classical NP problems, code unit tests) clusters in one neighborhood of "discrete CS-flavored problems." I wanted to test whether that neighborhood is doing the work for the method or whether it's incidental.</p>
 
 <p>RNA inverse folding is unusually well-suited as a test:</p>
 
@@ -165,10 +165,10 @@ Output:   SEQUENCE = GCUAACGUAUGCAACGUAAGCUUACGGUACCUGCC</code></pre>
 
 <figure>
   <img src="./figures/rna-training-curve.png" alt="Two-panel chart showing the RNA-RLVR training trajectory across 150 cumulative steps. Left panel: mean reward climbs from about 0.55 at step 0 to roughly 0.8 by step 80 and plateaus around 0.78. Right panel: in-domain perfect-fold rate climbs from about 0.2 to roughly 0.4 with high step-to-step variance. A dotted vertical line marks step 50 where training resumed from the trial checkpoint.">
-  <figcaption>150-step in-domain trajectory composed from the trial (steps 0–49) and trial_100 (steps 50–149) logs. Light traces are per-step values; bold lines are 10-step rolling averages. Mean reward climbs cleanly; the perfect-fold rate is noisier per-step (cooperative folding is high-variance), but the rolling average shows the climb that ends at the 52% headline on the held-out eval set.</figcaption>
+  <figcaption>150-step in-domain trajectory composed from the trial (steps 0–49) and trial_100 (steps 50–149) logs. Light traces are per-step values; bold lines are 10-step rolling averages. Mean reward climbs cleanly; the perfect-fold rate is noisier per-step (cooperative folding is high-variance), but the rolling average shows the climb that ends at the 52% figure on the held-out eval set.</figcaption>
 </figure>
 
-<p>A few observations are worth pulling out:</p>
+<p>A few observations from these numbers:</p>
 
 <ul>
   <li>The <strong>mean match</strong> climb (72.9% → 92.7%) tells a different story than the perfect-solve rate. The model learned to produce sequences that fold <em>close to</em> the target, even when not exact. That's a real shift in capability, not an artifact of the threshold.</li>
@@ -193,25 +193,25 @@ Output:   SEQUENCE = GCUAACGUAUGCAACGUAAGCUUACGGUACCUGCC</code></pre>
 <p>Graduate-level science reasoning <em>degrades</em> by 4.1 points; instruction-following degrades modestly; math is flat. This is the opposite sign of what the parallel BoolMin-RLVR run produced on the same base model with the same algorithm (BoolMin: GPQA <span class="pos">+3.5</span>). Two RLVR runs, both with strong in-domain learning, both with fast verifiers, opposite transfer signs.</p>
 
 <div class="callout">
-  <strong>What the RNA result actually says.</strong> The straightforward reading is that RLVR's structural properties (fast verifier, exploration, partial reward) don't automatically produce reasoning transfer. The choice of task domain interacts with what the model generalizes to. Boolean logic seems to share something with GPQA-style reasoning (constraint satisfaction, compositional structure) that RNA secondary-structure design doesn't. Disentangling whether that's about <em>task content</em> or about <em>what the model spends rollouts doing</em> is the natural next experiment; see the BoolMin writeup for that thread.
+  <strong>Reading the cross-domain result.</strong> RLVR's structural properties (fast verifier, exploration, partial reward) don't automatically produce reasoning transfer. The choice of task domain interacts with what the model generalizes to. Boolean logic seems to share something with GPQA-style reasoning (constraint satisfaction, compositional structure) that RNA secondary-structure design doesn't. Whether that's about <em>task content</em> or about <em>what the model spends rollouts doing</em> is the next experiment to run; see the BoolMin writeup for that thread.
 </div>
 
-<h2>What this contributes</h2>
+<h2>Reading the result</h2>
 
-<p>Two things, with different confidence levels.</p>
+<p>I'd separate what this run contributes by confidence.</p>
 
 <p>The strong claim, well-supported by the data: <strong>RLVR works on a domain with effectively zero pretraining overlap</strong>. In-domain learning is substantial (+22pp perfect solve, +19.8pp mean match) over a 150-step, ~$11 training budget. The reward design (layered stepping-stone → threshold → exact) and the format-robust verifier are reusable patterns for any inverse-design task where most rollouts miss the target.</p>
 
-<p>The weaker, more interesting claim, supported by the comparison with BoolMin: <strong>task choice is load-bearing for reasoning transfer</strong>. Same model, same algorithm, matched training budget. One task transfers positively to graduate-level science reasoning, the other transfers negatively. Whichever direction the field eventually lands on, "find any task with a fast verifier" is too coarse a recipe.</p>
+<p>The weaker, more interesting claim, supported by the comparison with BoolMin: <strong>task choice drives reasoning transfer</strong>. With model, algorithm, and training budget held constant, one task transfers positively to graduate-level science reasoning and the other transfers negatively. Whichever direction the field eventually lands on, "find any task with a fast verifier" is too coarse a recipe.</p>
 
-<p>Two methodological pieces are worth keeping:</p>
+<p>Reusable methodological pieces from this run:</p>
 
 <ol>
   <li><strong>The layered reward design.</strong> A binary reward on perfect-fold would have produced near-zero gradient through the early phase of training; the stepping-stone tier (length + alphabet) and the threshold-based partial credit (≥80% match) keep the signal informative without rewarding noise. I'd expect this layout to generalize to any inverse-design task where most candidates miss completely.</li>
   <li><strong>The output-format robustness in the verifier.</strong> The parser handles three output formats (echo-back, contiguous, and a regex fallback for the longest A/U/G/C stretch). This sounds boring but matters: it cleanly separates "the model didn't learn the task" from "the model produced a sequence in a format the verifier didn't recognize," and it kept early-training rollouts from being penalized for format quirks.</li>
 </ol>
 
-<h2 id="limits">Limitations and scope</h2>
+<h2 id="limits">Caveats and scope</h2>
 
 <ul>
   <li><strong>The instruct base.</strong> Qwen3-4B-Instruct has already been through RL-flavored instruction tuning, so this isn't a clean "RLVR from a base model" demonstration. The in-domain results are unaffected (the model clearly couldn't design RNA sequences before), but a claim like "this is what RLVR alone produces" would need a pure base model.</li>
@@ -221,13 +221,13 @@ Output:   SEQUENCE = GCUAACGUAUGCAACGUAAGCUUACGGUACCUGCC</code></pre>
   <li><strong>Validity rate didn't move.</strong> The model still fails to produce a valid candidate ~43% of the time. That's a different bottleneck from structural accuracy and would need a different reward shaping (or a longer training run) to address.</li>
 </ul>
 
-<h2>Future work</h2>
+<h2>Next experiments</h2>
 
 <ol>
   <li><strong>Disentangle task content from task structure.</strong> The BoolMin/RNA contrast is the most scientifically interesting finding here, and it's currently a comparison of two specific tasks. A shuffled-truth-table control on BoolMin (verifier accepts anything matching the output format) tests whether the algorithm or the task is doing the work. If GPQA still moves on the shuffled control, the structure was the active ingredient; if it doesn't, task content was. Either result is informative.</li>
   <li><strong>Multi-seed replication of the cross-domain numbers.</strong> The −4.1 on GPQA is a single-seed point estimate on a 198-instance benchmark. Sampling noise at 50% accuracy gives a standard error around ±3.5pp, so one additional seed at the 150-step checkpoint would tell us whether the negative transfer is robust or whether it sits inside the noise floor.</li>
   <li><strong>Full curriculum execution.</strong> The 3,500-step main run with the 3-phase curriculum is configured but only the 150-step easy-tier pilot has run. Whether hard-tier exposure changes either the in-domain ceiling or the cross-domain sign is open.</li>
-  <li><strong>Validity-rate reward shaping.</strong> Sequence-validity rate didn't move from 56% → 57% — the model still fails to produce a valid candidate ~43% of the time. A 2×2 ablation on stepping-stone weight × threshold strictness would identify whether reward shaping or training scale is the bottleneck.</li>
+  <li><strong>Validity-rate reward shaping.</strong> Sequence-validity rate didn't move from 56% to 57%; the model still fails to produce a valid candidate ~43% of the time. A 2×2 ablation on stepping-stone weight × threshold strictness would identify whether reward shaping or training scale is the bottleneck.</li>
   <li><strong>Comparison to a domain-specific RNA design model.</strong> ViennaRNA's <code>RNAinverse</code> and modern tools like RNAiFold provide a strong baseline; the gap (or overlap) is informative for whether this LLM is doing something a specialized solver couldn't.</li>
 </ol>
 

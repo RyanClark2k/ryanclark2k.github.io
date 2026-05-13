@@ -72,7 +72,7 @@
 
 <div class="tldr">
   <span class="tldr-label">TL;DR</span>
-  <p>I trained Qwen3-4B-Instruct with GRPO on Boolean circuit minimization from truth tables, using Espresso (via PyEDA) as the reference solver. <strong>GPQA Diamond climbed +3.5pp</strong> (48.0% → 51.5%): graduate-level science reasoning that has nothing to do with Boolean logic. n=1 seed, but the gain grew monotonically with training (<strong>+1.5 at step 50 → +3.5 at step 250</strong>), which is the strongest evidence I have that the effect is real rather than sampling noise; a second seed is in flight. MATH-500 was unaffected (-0.6pp, noise), IFEval showed a small alignment tax (-0.4pp). A matched-budget companion run on RNA inverse folding produced strong in-domain learning but <em>degraded</em> GPQA by 4.1 points. Same algorithm, same model, same training scale. The choice of task seems to matter more than the existence of a verifier.</p>
+  <p>I trained Qwen3-4B-Instruct with GRPO on Boolean circuit minimization from truth tables, using Espresso (via PyEDA) as the reference solver. <strong>GPQA Diamond climbed +3.5pp</strong> (48.0% → 51.5%): graduate-level science reasoning that has nothing to do with Boolean logic. n=1 seed, but the gain grew monotonically with training (<strong>+1.5 at step 50 → +3.5 at step 250</strong>), which is the strongest evidence I have that the effect is real rather than sampling noise; a second seed is in flight. MATH-500 was unaffected (-0.6pp, noise), IFEval showed a small alignment tax (-0.4pp). A matched-budget companion run on RNA inverse folding produced strong in-domain learning but <em>degraded</em> GPQA by 4.1 points. Algorithm, base model, and training scale match across both runs; only the task changes. The choice of task seems to matter more than the existence of a verifier.</p>
 </div>
 
 <table>
@@ -166,7 +166,7 @@ Output:  Y = (A & ~B) | (C & D)</code></pre>
   </tbody>
 </table>
 
-<p>Two things stand out. First, training on easy-tier-only produced double-digit improvements on medium and expert tiers, so the model isn't just memorizing easy-tier patterns. Second, hard tier remains effectively zero. The 2^7 = 128-row truth tables exceed what a 4B model can reason through reliably, so any transfer from hard instances would be limited; the in-domain generalization story rests on the easy → medium/expert jump.</p>
+<p>Training on easy-tier-only produced double-digit improvements on medium and expert tiers, so the model isn't just memorizing easy-tier patterns. Hard tier, on the other hand, remains effectively zero: 2^7 = 128-row truth tables exceed what a 4B model can reason through reliably, so any transfer from hard instances was always going to be limited. The in-domain generalization story rests on the easy → medium/expert jump.</p>
 
 <figure>
   <img src="./figures/boolmin-training-curve.png" alt="Two-panel chart showing the BoolMin-RLVR training trajectory across 250 cumulative steps. Left panel: mean reward climbs from around 0.5 at step 0 to approximately 0.9 by step 100 and plateaus near 0.95. Right panel: correctness rate follows a similar arc from about 0.5 to 0.9. A dotted vertical line marks step 50 where training resumed from the trial checkpoint.">
@@ -187,15 +187,15 @@ Output:  Y = (A & ~B) | (C & D)</code></pre>
   </tbody>
 </table>
 
-<p>The headline is <strong>GPQA Diamond +3.5</strong>, which is in the same ballpark as NP-Engine's +4.1 on the same benchmark from training on classical NP problems. The gain also grew with more training (+1.5 at 50 steps, +3.5 at 250), which is consistent with steady learning rather than a noisy point estimate.</p>
+<p>The number I came in wanting to see was <strong>GPQA Diamond</strong>, and it climbed +3.5, in the same ballpark as NP-Engine's +4.1 from training on classical NP problems. The gain also grew with more training (+1.5 at 50 steps, +3.5 at 250), consistent with steady learning rather than a noisy point estimate.</p>
 
 <p>MATH-500 was untouched. Two readings are plausible: (a) the 4B model is ceiling-saturated on MATH at 91%, or (b) Boolean minimization and mathematical reasoning engage genuinely different model capacities. I'd bet on (a) given the small headroom but can't distinguish them from the data.</p>
 
-<p>IFEval showed a small consistent regression: a modest alignment tax. The 50-step checkpoint had a small positive shift on IFEval that disappeared by step 250, suggesting whatever IFEval-aligned behavior emerged early was either noise or got optimized away by the longer training. Not a catastrophe, but worth noting.</p>
+<p>IFEval showed a small consistent regression: a modest alignment tax. The 50-step checkpoint had a small positive shift on IFEval that disappeared by step 250, suggesting whatever IFEval-aligned behavior emerged early was either noise or got optimized away by the longer training. The size is small enough that I'd believe a second seed could reverse it, but the direction is consistent across both eval modes.</p>
 
 <h2>The RNA comparison</h2>
 
-<p>The interesting question this experiment was built to answer is whether RLVR transfer is task-agnostic. I ran a parallel experiment on RNA inverse folding — same algorithm, same model family, same training budget, same evaluation suite. The in-domain story for RNA was good (perfect-solve rate 30% → 52%; <a href="./rna-rlvr.html">written up here</a>). The cross-domain story was the opposite of BoolMin's:</p>
+<p>The question this experiment was built to answer is whether RLVR transfer is task-agnostic. I ran a parallel experiment on RNA inverse folding with the algorithm, model family, training budget, and eval suite held constant. The in-domain story for RNA was good (perfect-solve rate 30% → 52%; <a href="./rna-rlvr.html">written up here</a>). The cross-domain story was the opposite of BoolMin's:</p>
 
 <table>
   <thead><tr><th>Benchmark</th><th class="num">Base</th><th class="num">BoolMin trained</th><th class="num">RNA trained</th></tr></thead>
@@ -206,21 +206,21 @@ Output:  Y = (A & ~B) | (C & D)</code></pre>
   </tbody>
 </table>
 
-<p>Two RLVR runs, two tasks with fast verifiers, both produced strong in-domain learning. One transferred to graduate-level science reasoning; the other actively hurt it.</p>
+<p>Both runs produced strong in-domain learning. The transfer signs went opposite ways: one helped graduate-level science reasoning, the other actively hurt it.</p>
 
 <div class="callout">
-  <strong>The shape of the claim.</strong> This isn't quite "RNA is bad for reasoning"; it's evidence that the structural properties of RLVR (verifier, exploration, partial reward) don't automatically produce transfer. The choice of task domain interacts with what the model learns to generalize. Boolean logic seems to share something with GPQA-style reasoning (constraint satisfaction, compositional structure) that RNA folding doesn't. Disentangling whether that's about task content or about what the model spends rollouts doing is open.
+  <strong>Framing.</strong> The result isn't "RNA is bad for reasoning"; it's evidence that the structural properties of RLVR (verifier, exploration, partial reward) don't automatically produce transfer. The choice of task domain interacts with what the model learns to generalize. Boolean logic seems to share something with GPQA-style reasoning (constraint satisfaction, compositional structure) that RNA folding doesn't. Whether that's about task content or about what the model spends rollouts doing is still open.
 </div>
 
-<h2>What this contributes</h2>
+<h2>Takeaways</h2>
 
 <ol>
-  <li><strong>Boolean minimization works as an RLVR signal.</strong> +27.2pp on easy, +21.6 on medium (from easy-only training), +3.5 on GPQA — at a $42 total budget on a 4B model.</li>
+  <li><strong>Boolean minimization works as an RLVR signal.</strong> +27.2pp on easy, +21.6 on medium (from easy-only training), +3.5 on GPQA, at a $42 total budget on a 4B model.</li>
   <li><strong>Cross-domain transfer is task-dependent, not algorithm-dependent.</strong> Matched-budget runs on two inverse-design tasks produce qualitatively different transfer signs. The implication for anyone designing an RLVR training mix is that "find any task with a fast verifier" isn't sufficient. Task choice carries real selection pressure on what the model generalizes to.</li>
   <li><strong>Easy-tier-only training produces meaningful out-of-tier generalization.</strong> Medium-tier instances are explicitly out-of-distribution during training, and the model still improved by 21.6pp on them. This is a small data point against the "RLVR just optimizes the training distribution" reading.</li>
 </ol>
 
-<h2 id="limits">Limitations and scope</h2>
+<h2 id="limits">Caveats</h2>
 
 <ul>
   <li><strong>Instruct-tuned base.</strong> Same caveat as RNA. The transfer claim survives because the base baseline was already established; the magnitude could shift on a clean base model.</li>
@@ -230,14 +230,14 @@ Output:  Y = (A & ~B) | (C & D)</code></pre>
   <li><strong>The RNA negative-control is informative but not airtight.</strong> RNA and BoolMin differ in domain, output format, and reward shape. A cleaner control (e.g., BoolMin with shuffled truth tables, breaking the verifier) would isolate "task structure" from "task content." Worth running.</li>
 </ul>
 
-<h2>Future work</h2>
+<h2>Open threads</h2>
 
 <ol>
   <li><strong>Multi-seed replication of the GPQA result.</strong> The +3.5 is the single most-cited number from this experiment and it deserves error bars.</li>
   <li><strong>Curriculum execution.</strong> Phase 2 (easy + medium) for ~750 additional steps, evaluated against the same suite. If GPQA continues to climb, that's strong evidence the effect scales; if it plateaus or reverses, equally informative.</li>
   <li><strong>Disentangling task content from task structure.</strong> A shuffled-truth-table control (verifier accepts anything) would test whether the model is learning logic or just learning to produce output the verifier likes. Companion run on a non-NP verifiable task in the same domain.</li>
   <li><strong>Scaling to 7B.</strong> Hard-tier in-domain performance was near zero at 4B; whether a 7B model can both learn hard instances and produce stronger transfer is the natural scaling question.</li>
-  <li><strong>Investigating IFEval drift.</strong> The 50-step → 250-step IFEval reversal hints at an optimization-pressure mechanism worth characterizing; KL divergence from the base over training would tell us whether instruction-following degrades smoothly or in a phase change.</li>
+  <li><strong>Investigating IFEval drift.</strong> The 50-step → 250-step IFEval reversal hints at an optimization-pressure mechanism I'd like to characterize; KL divergence from the base over training would tell us whether instruction-following degrades smoothly or in a phase change.</li>
 </ol>
 
 <h2>Code &amp; resources</h2>
