@@ -88,7 +88,7 @@
 
 <h2>The question</h2>
 
-<p>RLVR (reinforcement learning with verifiable rewards) has worked best when the verifier is fast and the task is far from contaminated pretraining data. The existing literature (math reasoning, classical NP problems, code unit tests) clusters in one neighborhood of "discrete CS-flavored problems." I wanted to test whether that neighborhood is doing the work for the method or whether it's incidental.</p>
+<p>RLVR (reinforcement learning with verifiable rewards) has worked best when the verifier is fast and the task is far from contaminated pretraining data. The existing literature (math reasoning, classical NP problems, code unit tests) mostly clusters in one neighborhood of "discrete CS-flavored problems." I wanted to test whether that neighborhood is driving reasoning transfer effects or whether other domains could produce similar cross-domain transfer.</p>
 
 <p>RNA inverse folding is unusually well-suited as a test:</p>
 
@@ -99,7 +99,7 @@
   <li><strong>Pretraining overlap is plausibly close to zero.</strong> Dot-bracket → nucleotide-sequence mappings are not standard ML content. The model is unlikely to have memorized any of it.</li>
 </ul>
 
-<p>If RLVR produces meaningful in-domain learning on RNA inverse folding, that's a signal that <em>task structure</em> (inverse design + fast verifier) matters more than <em>task content</em> (math, code, biology). If it doesn't, that's evidence the existing successes lean on domain-specific pretraining priors more than the field admits.</p>
+<p>If RLVR produces meaningful in-domain learning on RNA inverse folding, that's a signal that <em>task structure</em> (inverse design + fast verifier) matters more than <em>task content</em> (math, code, biology). If it doesn't, that's evidence the existing successes lean heavily on domain-specific pretraining priors.</p>
 
 <h2>Task design</h2>
 
