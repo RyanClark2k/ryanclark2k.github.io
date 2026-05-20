@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>thaw: snapshotable gVisor for sub-second cold starts — Ryan Clark</title>
+<style>
+  :root {
+    --bg: #fdfcf9;
+    --text: #1f1f1f;
+    --muted: #6b6b6b;
+    --accent: #b34c2c;
+    --rule: #e3ddd0;
+    --code-bg: #f3efe7;
+    --table-alt: rgba(243, 239, 231, 0.55);
+    --callout-bg: #fff8ed;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Charter', 'Iowan Old Style', 'Georgia', 'Times New Roman', serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+    font-size: 18px;
+  }
+  h1, h2, h3, h4, .sans { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', sans-serif; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }
+  h1 { font-size: 2.05rem; margin: 0 0 0.4rem; }
+  .subtitle { color: var(--muted); font-size: 1.12rem; font-style: italic; margin: 0 0 1.5rem; line-height: 1.45; }
+  .meta { color: var(--muted); font-size: 0.92rem; border-bottom: 1px solid var(--rule); padding-bottom: 1rem; margin-bottom: 2.5rem; font-family: -apple-system, sans-serif; }
+  .meta a { color: var(--muted); }
+  h2 { font-size: 1.45rem; margin-top: 3rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; margin-top: 2rem; color: #2a2a2a; }
+  p { margin: 1rem 0; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(179, 76, 44, 0.3); }
+  a:hover { border-bottom-color: var(--accent); }
+  .tldr { background: var(--callout-bg); border-left: 3px solid var(--accent); padding: 1rem 1.25rem; margin: 1.5rem 0 2.5rem; font-size: 1rem; }
+  .tldr p { margin: 0.4rem 0; }
+  .tldr-label { display: block; font-family: -apple-system, sans-serif; font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.3rem; font-weight: 600; }
+  code { font-family: 'Menlo', 'Monaco', 'Consolas', monospace; font-size: 0.88em; background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.88rem; line-height: 1.5; }
+  pre code { background: transparent; padding: 0; font-size: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 1.5rem 0; font-size: 0.9rem; font-family: -apple-system, sans-serif; }
+  th, td { padding: 0.55rem 0.7rem; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { background: var(--table-alt); font-weight: 600; border-bottom: 1px solid #c8c1b1; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:nth-child(even) td { background: var(--table-alt); }
+  .pos { color: #2c7a4d; font-weight: 600; }
+  .neg { color: #c8442a; font-weight: 600; }
+  .callout { border: 1px solid var(--rule); border-radius: 4px; padding: 0.9rem 1.1rem; margin: 1.25rem 0; font-size: 0.97rem; background: rgba(243, 239, 231, 0.45); }
+  blockquote { border-left: 3px solid var(--rule); margin: 1.25rem 0; padding: 0.2rem 0 0.2rem 1rem; color: var(--muted); font-style: italic; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 0.4rem 0; }
+  .footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); font-family: -apple-system, sans-serif; font-size: 0.88rem; color: var(--muted); }
+  .footer a { color: var(--muted); }
+  .nav-back { font-family: -apple-system, sans-serif; font-size: 0.88rem; margin-bottom: 2rem; }
+  .nav-back a { color: var(--muted); border-bottom: 1px solid transparent; }
+  .nav-back a:hover { border-bottom-color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="nav-back"><a href="./index.html">← all posts</a></div>
+
+<h1>thaw: snapshotable gVisor for sub-second cold starts</h1>
+<p class="subtitle">A from-scratch implementation of Modal's snapshot-restore model on top of gVisor, with the full substrate underneath: content-addressed image format, unified blob store, custom lazy FUSE, thin scheduler, and a Modal-shaped Python SDK.</p>
+<p class="meta">Ryan Clark · May 2026</p>
+
+<div class="tldr">
+  <span class="tldr-label">TL;DR</span>
+  <p>A serverless function shouldn't pay <code>import torch</code> + model build (~13 s for resnet50) on every cold start. The standard answer is to checkpoint-and-restore the warm process. I built that end-to-end on gVisor (image format up through SDK) and measured it on a real workload: a 661 KB JPEG → resnet50 → ImageNet label. <strong>Cold p50 774 ms (p99 806 ms, n=12), warm 125 ms p50 (n=30)</strong>, against a same-host from-scratch baseline of ~2.58 s and a true cold pull of ~29 s. 10 of 12 cold samples land under the 800 ms target; 2 are over (≤806 ms). <code>runsc restore</code> itself was ~240–300 ms at every stage of the project. Every cold-path tax I hit was something <em>around</em> restore (rootfs re-extraction, FUSE faults on the critical path, lazy faulting torch with no prefetch), diagnosed precisely and either fixed or scoped out with a stated tradeoff. The most interesting parts of the project are the things that didn't work the first time.</p>
+</div>
+
+<h2>The thesis, and the shape of the cold-start tax</h2>
+
+<p>Modal's pitch (and the reason cold starts on ML serverless got fast) is straightforward: if a function's expensive work is importing torch and building a model, do that work once, checkpoint the warm process, and on every later cold start restore the post-import memory state directly. The model never has to be built again. The Python interpreter never has to re-import.</p>
+
+<p>The natural questions are: how much of that speedup is the snapshot itself, and how much is everything else? Is <code>runsc restore</code> the bottleneck? Is image transfer? Is file system materialization? If snapshot-restore is the magic, what's the irreducible cost? I wanted to know by building it.</p>
+
+<p>thaw is the result: a Go binary (<code>cmd/thaw {snapshot, restore, image, push, pull, mount, deploy, scheduler}</code>) plus a Modal-shaped Python SDK, all sitting on top of gVisor's checkpoint/restore. Everything in the path is custom: image format, on-disk store, lazy FUSE, scheduler. Stdlib-only with one deliberate exception (vendored <code>hanwen/go-fuse</code>; the FUSE wire protocol is a learning-scoped target, not a reimpl-scoped one, and S3 SigV4 went the other way for the same reason).</p>
+
+<h2>The headline number, and what it cost to get there</h2>
+
+<p>The real workload is <code>examples/torch_app.py</code>: <code>import torch</code> at module load, build resnet50 with weights baked into the image, transform + 1000 ImageNet labels, one warm forward at snapshot time. Per request: a real 661 KB JPEG → real classification. Driven through the actual platform (<code>thaw deploy</code> → <code>thaw scheduler</code> → SDK <code>app.call</code> with JPEG bytes). The metric is the SDK's <code>stat.total_ms</code>: invoke → first usable result, fully synchronous (no scheduler hiding restore time behind a queue).</p>
+
+<table>
+  <thead>
+    <tr><th>regime</th><th class="num">p0</th><th class="num">p50</th><th class="num">p90</th><th class="num">p99</th><th class="num">mean</th><th class="num">sd</th><th class="num">n</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>COLD steady-state</strong></td><td class="num">721.9</td><td class="num"><strong>773.7</strong></td><td class="num">803.2</td><td class="num"><strong>806.4</strong></td><td class="num">771.7</td><td class="num">26.3</td><td class="num">12</td></tr>
+    <tr><td> — of which cmdRestore wall</td><td class="num">487.0</td><td class="num">519.6</td><td class="num">559.0</td><td class="num">564.8</td><td class="num">525.7</td><td class="num">25.0</td><td class="num">12</td></tr>
+    <tr><td> — of which <code>runsc restore</code></td><td class="num">—</td><td class="num"><strong>≈ 280</strong></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>
+    <tr><td><strong>WARM</strong> (warm-pool reuse)</td><td class="num">101.8</td><td class="num"><strong>124.8</strong></td><td class="num">130.5</td><td class="num">132.9</td><td class="num">122.3</td><td class="num">7.2</td><td class="num">30</td></tr>
+    <tr><td>one-time materialize (first cold)</td><td class="num">—</td><td class="num"><strong>~5700</strong></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">1</td></tr>
+  </tbody>
+</table>
+
+<p>All numbers in milliseconds. Substrate: Hetzner CPX31 (AMD EPYC-Genoa, 4 shared vCPU, 8 GB RAM, local NVMe), <code>runsc release-20260511.0</code>, <code>--network=none</code>. 0/44 contract violations across the run.</p>
+
+<p>Cold p50 is comfortably sub-second. The cold p99 (806 ms) is about 1% over the 800 ms target for a <em>real</em> heavy inference; lighter workloads (numpy, FastAPI) clear it with margin. I'm calling out the two over-target samples explicitly because "10/12 under 800 ms, 2 at most 806 ms" is more useful than rounding the headline down. Warm 125 ms is where serverless ML actually lives in practice, once a function has been called once.</p>
+
+<p>The row in the middle is the part I want to point at. <code>runsc restore</code> is ~280 ms. It was ~280 ms when the integrated platform measured a cold p50 of 5.7 seconds. It was ~280 ms when the platform measured 1.6 seconds. It was ~280 ms at the headline 774 ms. The snapshot-restore primitive is not the bottleneck and never was. Every other number in the cold path is something happening around restore: file system materialization, page-file reassembly from a content-addressed store, FUSE faults on the critical path, lazy-loading without prefetch. Each of those has its own little story.</p>
+
+<h2>The journey, because that's where the reasoning lives</h2>
+
+<h3>The arm64 dead end</h3>
+
+<p>Early in the project, on a local arm64 Lima VM, <code>runsc checkpoint</code> worked fine (~30 ms) but <code>runsc restore</code> SIGILL'd on every real CPython process. Both <code>systrap</code> and <code>ptrace</code> platforms. A trivial <code>/bin/sleep</code> restored cleanly, so core checkpoint/restore worked; the symptom was specific to processes with the kind of state CPython has. My best hypothesis is arm64 PAC/BTI register state not preserved across gVisor restore: the userspace instructions live, but the kernel/CPU pointer-authentication state where the bug lives is untouched by Rosetta (asked and answered separately).</p>
+
+<p>This was the decision-gate moment: thesis-killer, or substrate-specific? I provisioned a Hetzner CPX31 (AMD EPYC-Genoa, x86-64), ran the same matrix, and CPython restored cleanly on both platforms. Substrate decision settled: all subsequent work is x86-64 only. Modal ships this on x86-64; that's not a coincidence. The arm64 issue is a real bug surface, not an architectural property of gVisor, but it ate a half-week and reframed the rest of the project as cloud-only.</p>
+
+<h3>The content-addressed store, and a measured negative</h3>
+
+<p>The bundle format is content-addressed: rootfs and checkpoint files are decomposed into sha256-named 4 MiB chunks, deduped by construction, reassembled with corruption detection. Tiered storage (NVMe ← S3 origin) is one indirection away, via a hand-rolled SigV4 client because writing it once teaches you what the surface actually looks like and the wire protocol is small enough to be the right scope.</p>
+
+<p>The first cut chunked the <em>flattened</em> <code>docker export</code> tar. Re-importing the identical image deduped at ~98.5% (CAS works). But two images derived from the same base (a numpy-pandas image and the torch image, both <code>FROM python:3.12-slim</code>) shared <strong>0 chunks</strong>. The dedup payoff across artifacts was a flat zero.</p>
+
+<p>The cause is exactly what you'd expect once you look at it: torch's extra files shift byte offsets in the tar, so every 4 MiB chunk boundary misaligns versus the simpler image's shared base. File <em>content</em> never coincides with a chunk <em>boundary</em>. CAS is exact; the offsets weren't.</p>
+
+<p>The instinct here is to reach for content-defined chunking (FastCDC). I deliberately didn't. The same root cause (chunking-over-tar) also broke the FUSE that would come next: a lazy FUSE can't serve one file without materializing the whole tar prefix that contains it. So instead of building FastCDC as a standalone thing that would be a throwaway, I went straight to per-file content-addressed entries. Each file becomes its own list of chunks; the image manifest tracks files with their per-file content addresses; the FUSE can seek to any file at any offset.</p>
+
+<p>After the change: re-importing the identical image dedupes to <strong>+0 chunks</strong> (was +68); bench and torch share <strong>5,612 chunks ≈ 58% of bench reused by torch</strong> (was 0); restore got <em>faster</em> not slower (no whole-tar reassemble + untar on the critical path). One refactor solved two problems. The lesson I keep coming back to from this one: when a measured negative has an obvious fix that's also the right move for a downstream system, do the right move instead of patching the negative in isolation.</p>
+
+<h3>Lazy without prefetch is a trap</h3>
+
+<p>The custom lazy FUSE (<code>internal/thawfs</code>) faults chunks on demand from CAS. <code>find</code> over an entire ~10k-file torch image faults 0 content chunks (directory entries from the manifest are enough); reading two files lands at <strong>8 of 9,617 chunks served = 0.1%</strong>. Lazy as advertised.</p>
+
+<p>The question is whether lazy is fast in practice on a heavy workload. Measured: booting the per-file CAS image lazily and running torch init to first result lands at <strong>~18.9 s p50</strong>. The naive <code>docker pull</code> cold is ~29 s. The lazy path is barely 1.5× better. A trap, not a win.</p>
+
+<p>What's happening: torch's import working set is huge and synchronous. The FUSE doesn't know in advance which chunks will be needed, so every page fault is a round-trip on the critical path. The catastrophic first-read tail is the cost of <em>not knowing</em> the working set. The same lesson reappeared when I tried to optimize cold restore later: an early prefetch pass that fetched only the checkpoint <code>pages.img</code> performed identically to no prefetch (~5.6 s for restore), and only adding the rootfs profile to the prefetch set collapsed it to 0.5 s. gVisor's C/R re-faults file-backed library mappings (libpython, .so's) on restore, so the snapshot-time profile is exactly the right prefetch target. Measuring caught the wrong call before shipping it; I reverted the half-measure and removed the misleading flag.</p>
+
+<p>Lazy faulting wins when the working set is small and unknown; eager materialization wins when it's large and knowable. For a snapshot-restore platform, the working set is <em>always</em> knowable because the snapshot-time profile <em>is</em> the working set. The platform's default is the eager path; the lazy FUSE is opt-in and retained for the small-workload case it actually wins on.</p>
+
+<h3>The cold-path collapse: materialize-once, restore-many</h3>
+
+<p>The first integrated build of the scheduler measured <strong>5.7 s p50 cold</strong> for the real workload. This was nominally a regression, since the bare <code>thaw restore</code> path was hitting ~240 ms. The integration was paying ~5 seconds I had to find.</p>
+
+<p>The diagnosis: per call, the scheduler was re-extracting the full 1.18 GB rootfs from CAS into a fresh per-sandbox work directory, then <code>runsc restore</code> was reassembling the 365 MB checkpoint <code>pages.img</code> from CAS bytes the same way. Both were repeatable work that <em>could</em> have been done once.</p>
+
+<p>The fix is a symmetric pair of caches, digest-keyed:</p>
+
+<table>
+  <thead>
+    <tr><th>stage</th><th>steady-state cold p50</th><th>note</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>as first built</td><td class="num">5,736 ms</td><td>per-call 1.18 GB rootfs re-extract dominated</td></tr>
+    <tr><td>+ shared rootfs cache</td><td class="num">1,658 ms</td><td>3.5×; overlay lower is a passive cached directory</td></tr>
+    <tr><td>+ shared checkpoint cache</td><td class="num">703 ms</td><td>synthetic workload, every sample &lt; 800 ms</td></tr>
+    <tr><td>+ real workload (real photo → label)</td><td class="num"><strong>774 ms</strong></td><td>p99 806 ms (real JPEG decode + preprocess + forward)</td></tr>
+  </tbody>
+</table>
+
+<p>The architectural detail that matters: the shared rootfs is a passive cached directory plus a per-sandbox kernel overlay. That's the lazy-FS chain minus the FUSE. The active in-process FUSE was incompatible with the scheduler's lifecycle, because <code>thaw restore</code> exits after the restore call, and an in-process FUSE dies with it, but the scheduler has to keep the sandbox parked for warm-pool reuse. A passive directory + kernel overlay survives <code>thaw restore</code> exiting; the scheduler owns the overlay umount in <code>sandbox.teardown()</code> after <code>runsc delete</code>. Cold / warm / evict / drain are leak-free (0 sandboxes, 0 mounts across the test matrix). This is the moment the lazy-FS work paid off as architecture, not as the FUSE you'd reach for.</p>
+
+<p>The one-time materialize (~5.7 s) is real, per (function, host). I report it separately and prominently rather than folding it into the steady-state distribution. It amortizes over every later cold start and is the same class of cost as Modal materializing at deploy. A later refinement moves the materialization into <code>thaw deploy</code> itself, so the first invocation pays only the genuinely-irreducible <code>import torch</code> + build-resnet50 cost (~13.4 s), gets served, and then checkpoints in the background so call #2 is already steady-state cold at about 0.84 s, roughly 16× faster than call #1. The snapshot is the actual win.</p>
+
+<h3>The honest crossover</h3>
+
+<p>The benchmark I most want to point at, because it's the one where the result didn't go the way I expected: a 2-way head-to-head against eager-pull-cold (i.e., the naive "just <code>docker pull</code> and run") across three workloads (tiny / numpy-pandas-fastapi / torch-resnet50) × two network profiles (loopback / 25 ms RTT, 100 Mbit). N=30 warm, N=12 cold, 504 runs, 0 failures.</p>
+
+<table>
+  <thead>
+    <tr><th>workload × link</th><th class="num">thaw cold</th><th class="num">eager-pull cold</th><th class="num">ratio</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>tiny / loopback</td><td class="num">small</td><td class="num">small</td><td class="num"><span class="pos">~7×</span></td></tr>
+    <tr><td>numpy+pandas+fastapi / loopback</td><td class="num">fast</td><td class="num">fast</td><td class="num"><span class="pos">~7×</span></td></tr>
+    <tr><td>torch / loopback</td><td class="num">fast</td><td class="num">fast</td><td class="num"><span class="pos">~9×</span></td></tr>
+    <tr><td>tiny / 25 ms · 100 Mbit</td><td class="num">small</td><td class="num">small</td><td class="num"><span class="pos">2.2×</span></td></tr>
+    <tr><td>numpy+pandas+fastapi / 25 ms · 100 Mbit</td><td class="num">19.2 s</td><td class="num">11.5 s</td><td class="num"><span class="neg">0.60× (loss)</span></td></tr>
+    <tr><td>torch / 25 ms · 100 Mbit</td><td class="num">80.5 s</td><td class="num">29.6 s</td><td class="num"><span class="neg">0.37× (loss)</span></td></tr>
+    <tr><td>any workload / warm-pool reuse</td><td class="num">125–1900 ms</td><td class="num">n/a</td><td class="num"><span class="pos">5–7×</span></td></tr>
+  </tbody>
+</table>
+
+<p>thaw wins warm everywhere, net-independent, by 5–7× (torch warm is 1.9 s vs eager 14 s; this is the case that matters once a function has been invoked once). It wins cold 7–9× on a fast link. But cold over a real-network model for heavy images, thaw loses, with torch by nearly 3×.</p>
+
+<p>The mechanism is visible in the timing structure, though I didn't packet-trace it. thaw ships uncompressed CAS bytes and serializes the full prefetch working set onto the critical path. <code>docker pull</code> ships gzip layers in parallel and is netem-insensitive; its cold wall is extract + import, not transfer. The same metric the head-to-head measures (fully synchronous start to first real op) refuses thaw the scheduler-overlap it doesn't have in this benchmark. The integrated scheduler eventually lets that overlap happen, but the head-to-head deliberately doesn't allow it; the point is to compare substrates with the same discipline.</p>
+
+<p>I report this as a loss and a mechanism, not a footnote. Two named next-steps that would move the constant are recorded but not built: compress CAS chunks in transit (zstd, format-additive), and overlap prefetch with scheduling. Both are out of scope for "understand the substrate", and either would change this crossover. The point of running the benchmark wasn't to win it.</p>
+
+<h2>What's actually in the box</h2>
+
+<table>
+  <thead>
+    <tr><th>component</th><th>path</th><th>what it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>thaw snapshot</code> / <code>restore</code></td><td><code>cmd/thaw/</code>, <code>internal/manifest/</code></td><td>gVisor C/R wrapped in a content-addressed bundle format (v2): per-file image entries, sentinel-triggered checkpoint, CPU-feature-set as a first-class manifest field</td></tr>
+    <tr><td>Content-addressed store</td><td><code>internal/cas/</code>, <code>internal/store/</code></td><td>sha256 fixed 4 MiB chunks; dedup-by-construction; corruption-detecting reassemble; tiered NVMe ← S3 origin via hand-rolled SigV4 (<code>internal/s3/</code>)</td></tr>
+    <tr><td>Per-file image format</td><td><code>internal/imgfs/</code></td><td>flattened <code>docker export</code> → per-file content-addressed entries; faithful rootfs (symlinks/hardlinks/devices); 58% cross-image dedup</td></tr>
+    <tr><td>Custom lazy FUSE</td><td><code>internal/thawfs/</code>, vendored <code>go-fuse</code></td><td>on-demand chunk faults from CAS; mounts as the overlay lower for a gVisor gofer rootfs</td></tr>
+    <tr><td>Thin scheduler + SDK</td><td><code>cmd/thaw/scheduler.go</code>, <code>sdk/thaw.py</code></td><td>Unix-socket JSON protocol, warm-pool + idle-TTL, leak-free SIGTERM drain; Modal-shaped <code>@app.function</code> / <code>.remote()</code> / <code>.call()</code></td></tr>
+    <tr><td><code>thaw deploy</code></td><td><code>cmd/thaw/deploy.go</code>, <code>internal/deploy/</code></td><td>atomic registry JSON; <code>--snapshot=false</code> for non-blocking import-only deploys + auto-snapshot on first invocation</td></tr>
+  </tbody>
+</table>
+
+<p>Stdlib-only Go, cross-compiles darwin/arm64 → linux/amd64, so the runtime box needs no Go toolchain. One vendored dep: <code>hanwen/go-fuse v2.10.1</code>, the deliberate exception. The FUSE wire protocol is a learning-scoped target, not a reimpl-scoped one; opposite call from S3 SigV4, for the same reason.</p>
+
+<h2>Honest caveats</h2>
+
+<ul>
+  <li>n=12 cold / n=30 warm on the headline workload. Tight sd (cold 26 ms); the precise statement is "10/12 &lt; 800 ms, 2 ≤ 806 ms" rather than a clean p99. 0/44 contract violations.</li>
+  <li>The one-time materialize (~5.7 s) is real, per (function, host). Reported separately rather than folded into the steady-state distribution. Same class of cost as Modal materializing at deploy; the auto-snapshot path moves the rootfs piece into <code>thaw deploy</code>'s untimed prepare.</li>
+  <li>The no-checkpoint lazy path is a trap for heavy imports (~19 s). Eager materialize-once is the one to use; auto-snapshot-on-first-invocation handles the no-checkpoint-yet case.</li>
+  <li>Cold is measured fully synchronous, with no scheduler hiding restore time behind a queue. Deliberately not flattered.</li>
+  <li>Shared-vCPU cloud VM, not bare metal. <code>--network=none</code> for the headline run; the head-to-head's netem matrix is the network story.</li>
+  <li>Single-node, serialized calls. Distributed scheduling is out of scope by design.</li>
+  <li>Cache GC is out of scope. Shared rootfs + checkpoint caches grow per distinct deployment; intended for evaluation, not production.</li>
+  <li>No Modal head-to-head. The honest framing is "Modal's model, from scratch on gVisor"; the goal was understanding the stack, not benchmarking against the original.</li>
+</ul>
+
+<h2>The visceral demo</h2>
+
+<p>Same gVisor, same image, same real photo, same resnet50. The only variable is thaw's snapshot + warm pool. Two contestants race live: contestant A runs without a snapshot (fresh <code>runsc run</code>, import torch, build model, classify), and contestant B runs thaw (SDK → scheduler, one cold restore then warm-pool reuse, keeps classifying until A finishes its single result).</p>
+
+<p>Validated run: <code>dog.jpg → Samoyed</code> on both sides, with the one-time materialize shown as an explicit untimed prepare. In the 5.53 seconds A needed for one inference, B served 16 (1 cold + 15 warm).</p>
+
+<h2>What I'd do next</h2>
+
+<ul>
+  <li>Zstd-compress CAS chunks in transit. Format-additive: CAS hashes the uncompressed bytes, so only the wire format changes. Moves the constant that decided the network-cold crossover.</li>
+  <li>Overlap prefetch with scheduling, which is what Modal actually does. The scheduler exists; what's missing is hiding the cold's prefetch tail behind the request queue's natural latency. That belongs in the scheduler, not the substrate.</li>
+  <li>Cache GC. Currently out of scope; for production, the shared rootfs and checkpoint caches grow per distinct deployment digest, so LRU eviction with a configurable cap is the obvious add.</li>
+  <li>A Modal head-to-head. The goal was to understand the stack, not benchmark against the reference implementation. Now that the stack is built, the comparison would be worth doing on the same workload, same VM class, same JPEG.</li>
+</ul>
+
+<h2>Code &amp; resources</h2>
+
+<ul>
+  <li>Repository: <a href="https://github.com/RyanClark2k/thaw">github.com/RyanClark2k/thaw</a></li>
+  <li>Real-workload benchmark: <code>scripts/demo.sh</code>; raw <code>docs/data/demo.csv</code></li>
+  <li>No-checkpoint measurement: <code>scripts/nockpt.sh</code>; raw <code>docs/data/nockpt.csv</code></li>
+  <li>Head-to-head vs eager-pull-cold: <code>scripts/headtohead.sh</code>; raw <code>docs/data/headtohead.csv</code></li>
+  <li>Race demo: <code>scripts/race.sh</code></li>
+  <li>Workload: <code>examples/torch_app.py</code> + <code>examples/Dockerfile.torchapp</code></li>
+</ul>
+
+<div class="footer">
+  Ryan Clark · <a href="./index.html">all posts</a>
+</div>
+
+</body>
+</html>

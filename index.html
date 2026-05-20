@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ryan Clark — research notes</title>
+<title>Ryan Clark — research and engineering notes</title>
 <style>
   :root {
     --bg: #fdfcf9;
@@ -40,10 +40,16 @@
 </head>
 <body>
 
-<h1>Research notes</h1>
-<p class="intro">Write-ups on my research experiments.</p>
+<h1>Research and engineering notes</h1>
+<p class="intro">Write-ups on my research experiments and engineering projects.</p>
 
 <ul class="posts">
+
+  <li>
+    <h2><a href="./thaw.html">thaw: snapshotable gVisor for sub-second cold starts</a></h2>
+    <p class="meta">May 2026</p>
+    <p class="hook">A from-scratch implementation of Modal's snapshot-restore model on top of gVisor, with the full substrate underneath: content-addressed image format, unified blob store, custom lazy FUSE, thin scheduler, and a Modal-shaped Python SDK. Real workload (resnet50 on a 661 KB JPEG): cold p50 <strong>774 ms</strong>, warm <strong>125 ms</strong>; <code>runsc restore</code> itself was ~280 ms at every stage. The interesting parts are the things that didn't work the first time.</p>
+  </li>
 
   <li>
     <h2><a href="./synthetic-codebases.html">Synthetic codebases as RL training signal</a></h2>
