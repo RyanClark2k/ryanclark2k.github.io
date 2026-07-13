@@ -70,7 +70,8 @@
 
 <div class="tldr">
   <span class="tldr-label">TL;DR</span>
-  <p>RL training frameworks push fresh weights into a live vLLM engine every step. CUDA graphs bake device pointers at capture time. vLLM's reload machinery preserves storage addresses for registered parameters and buffers, and silently protects nothing else. Marlin's quantized-GEMM kernel keeps two runtime tensors outside that protection: a workspace on the kernel object and, for act-order GPTQ, the <code>g_idx_sort_indices</code> permutation. After one reload, every captured graph is reading freed memory. The obvious A/B test (generate, reload identical weights, generate, compare) <strong>passes on the broken code</strong>, because stale memory still holds bit-identical values until something reclaims it. An instrumented test caught it: 88/88 tensor addresses move on reload on main, and a write-to-live-state probe shows the graphs ignore the tensors the engine believes it has. Then the probe's own temporary allocations reclaimed the freed workspace blocks and the next generation, 1.2 s before the reload, spun the GPU at 100% for ten minutes. Fix is ~30 lines; the same audit found the pattern at eight more sites and retracted two of my own claims along the way. Total GPU bill: under $2 of rented 4090.</p>
+  <p>RL training frameworks push fresh weights into a live vLLM engine every step. CUDA graphs bake device pointers at capture time. vLLM's reload machinery preserves storage addresses for registered parameters and buffers, and silently protects nothing else. Marlin's quantized-GEMM kernel keeps two runtime tensors outside that protection: a workspace on the kernel object and, for act-order GPTQ, the <code>g_idx_sort_indices</code> permutation. After one reload, every captured graph is reading freed memory. The obvious A/B test (generate, reload identical weights, generate, compare) <strong>passes on the broken code</strong>, because stale memory still holds bit-identical values until something reclaims it. An instrumented test caught it: 88/88 tensor addresses move on reload on main, and a write-to-live-state probe shows the graphs ignore the tensors the engine believes it has. Then the probe's own temporary allocations reclaimed the freed workspace blocks and the next generation, 1.2 s before the reload, spun the GPU at 100% for ten minutes.</p>
+  <p>Fix is ~30 lines; the same audit found the pattern at eight more sites and retracted two of my own claims along the way. All eight are now fixed and live-validated, and a generalized version of the test caught the same class in a second kernel on its first run. Total GPU bill: about $3 of rented 4090.</p>
 </div>
 
 <h2>The setup: weight reloads under CUDA graphs</h2>
@@ -156,7 +157,7 @@ VERDICT: FIXED - storage identity preserved across reload; captured graphs read 
     <tr><td>FP8 dense Marlin (<code>marlin_utils_fp8.py:135</code>)</td><td><span class="neg">rebinds, 88/88</span></td><td>live: online-FP8 TinyLlama; this is the default path on GPUs without native FP8</td></tr>
     <tr><td>NVFP4 dense fallback (<code>marlin_utils_fp4.py:243</code>)</td><td><span class="neg">rebinds, 88/88</span></td><td>live: NVFP4 TinyLlama; default path on pre-Blackwell hardware</td></tr>
     <tr><td>FP8 Marlin MoE (<code>marlin_utils_fp8.py:283</code>)</td><td><span class="neg">rebinds, 6/6</span></td><td>live: a tiny <em>random-weight</em> Mixtral. A pointer census doesn't care if the model is any good; it needs the architecture, not the training</td></tr>
-    <tr><td>MXFP8 + FP4 MoE + one conditional (5 sites)</td><td>static only</td><td>the exercising checkpoints are tens of GB or barely exist publicly</td></tr>
+    <tr><td>MXFP8 + FP4 MoE + one conditional (5 sites)</td><td>static only, at the time; see day two below</td><td>the exercising checkpoints are tens of GB or barely exist publicly</td></tr>
     <tr><td>AWQ MoE (<code>auto_awq.py:664</code>)</td><td><span class="pos">retracted</span></td><td>workspace assigned in <code>create_weights</code>, which never re-runs on reload</td></tr>
     <tr><td>GPTQ MoE (<code>auto_gptq.py:651</code>)</td><td><span class="pos">retracted</span></td><td>same</td></tr>
   </tbody>
@@ -166,6 +167,26 @@ VERDICT: FIXED - storage identity preserved across reload; captured graphs read 
 
 <p>One trick from this phase worth keeping: <code>VLLM_TEST_FORCE_FP8_MARLIN=1</code> plus on-the-fly FP8 quantization of a small bf16 model reaches the FP8 Marlin paths on hardware that would otherwise route elsewhere, and a random-weight architecture clone (<code>dacorvo/Mixtral-tiny</code>) reaches the MoE machinery for pennies. Lifecycle bugs don't need good models to reproduce.</p>
 
+<h2>Day two: every row goes live</h2>
+
+<p>The maintainer's answer came back within hours: fold all eight sites into the PR, with the corresponding validation. That turned the five static rows into a checkpoint-hunting problem. Three fell to artifacts that already existed; vLLM's own test suite keeps tiny random-weight DeepSeek-V3 clones with real quantized variants, and online mxfp8 quantization reaches the MXFP8 paths with no checkpoint at all. The last two rows had no exercising checkpoint anywhere public.</p>
+
+<p>The random-weights trick generalizes further than I first used it. llm-compressor will quantize a 10&nbsp;MB random Qwen3-MoE clone, data-free, into the exact <code>mxfp4-pack-quantized</code> format the unreachable path demands. Fifteen seconds on CPU produced a 2&nbsp;MB checkpoint, and the engine log printed the familiar fallback warning as it routed into <code>prepare_moe_fp4_layer_for_marlin</code>. If the exercising artifact doesn't exist, you can manufacture it.</p>
+
+<p>Final matrix, all on one 4090: eight sites, every one rebinding on the unfixed commit, every one at 0/N on the fix. Two rows earned footnotes. The MXFP4 MoE census read 18/30 moved on the bug side; the caching allocator had handed 12 same-size blocks back at their old addresses. Any movement proves the rebind, but this is the masking story again in miniature: bug-side address stability can be allocator luck, so the fixed side has to show 0/N by construction, and it does. And the MXFP8 MoE path reproduced the livelock. Post-reload generation pinned the GPU at 100% again, and this time the wedged process shrugged off SIGTERM and had to be killed by PID. The failure signature replicates across kernels, which is what you want if the diagnosis is right.</p>
+
+<h2>The test that found the next one</h2>
+
+<p>Every per-site check in this story reduces to one shape: build a minimal layer, run the kernel's post-load processing twice, replay the production copy-back in between, assert that no reachable tensor moved. The RFC author asked about systematic coverage, so I parametrized that shape over the mixed-precision kernel registry instead of writing it per site. Twenty-eight cases fall out of fourteen kernels. Kernels whose post-load is pure torch run on a laptop CPU, and two small stub adapters cover the device-only ops in Marlin and Machete. On its first full run it failed on a kernel I had never audited:</p>
+
+<pre><code>FAILED test_post_load_runtime_tensors_stable[MacheteLinearKernel-act_order]
+AssertionError: runtime tensors escape reload copy-back protection:
+  moved={'MacheteLinearKernel.act_perm.kw[perm]': ('0x149b07fc0', '0x149b09e80')}</code></pre>
+
+<p>Machete's post-load computes a fresh <code>torch.argsort</code> permutation on every call and captures it in <code>self.act_perm</code>, inside a <code>functools.partial</code>. Unregistered, on the kernel object, read at apply time: the sort-indices bug in a different kernel family. Machete is the preferred W4A16 kernel on Hopper, so act-order GPTQ reloads on H100s sit right on it. It is unfixed as I write this; I reported it as a new row on the RFC, and confirming it live needs SM90 hardware my rented Ada card can't impersonate.</p>
+
+<p>The detail I keep thinking about is that the first version of the test missed it. <code>act_perm</code> is a callable, and the tensor hides in the partial's keyword arguments; an attribute walk sees a function and moves on. The walk has to unwrap partials and closure cells before this kind of capture becomes visible. Day one's lesson about registration semantics, recurring one level of indirection deeper. On the 4090 the same test runs five kernels against their real device ops (Marlin passes there without any monkeypatching, which retires the last asterisk on the fix), and Machete stays skipped on that card until someone points a Hopper at it.</p>
+
 <h2>What I'm taking away</h2>
 
 <ul>
@@ -174,14 +195,15 @@ VERDICT: FIXED - storage identity preserved across reload; captured graphs read 
   <li><strong>Failure signatures carry the diagnosis.</strong> Wrong tokens, illegal access, and infinite spin implicate different tensors. The livelock pointed at sync counters before I looked at a single line of kernel code.</li>
   <li><strong>Registration semantics are a bug surface.</strong> <code>module.attr = tensor</code> and <code>module.attr = Parameter(tensor)</code> diverge silently in every system that walks the module registry: reload, state_dict, device moves. The type of the right-hand side is doing invisible work.</li>
   <li><strong>Latent bugs live where the naive test passes.</strong> This one sat on a heavily-used path precisely because every reasonable smoke test of that path is naive in the specific way that hides it.</li>
+  <li><strong>If the exercising artifact doesn't exist, synthesize it.</strong> A random-weight clone reproduces lifecycle bugs; a data-free quantized clone of one reaches paths that no public checkpoint exercises. The manufactured checkpoint was 2&nbsp;MB.</li>
 </ul>
 
 <h2>Status &amp; artifacts</h2>
 
 <ul>
-  <li>Fix + CPU regression test: <a href="https://github.com/vllm-project/vllm/pull/48438">vllm#48438</a>, under review. The validation script is inline in the PR description; it runs on any SM75+ GPU in about five minutes.</li>
-  <li>Context: <a href="https://github.com/vllm-project/vllm/issues/48312">RFC #48312</a>, the RL weight-reload correctness campaign this slots into. A follow-up PR sweeping the remaining sibling sites is scoped and pending a maintainer's preference on packaging.</li>
-  <li>Cost of the whole investigation: one working day end to end, of which about two hours of rented 4090 at $0.669/hr. The livelock was the single largest line item on the GPU bill, and worth every cent.</li>
+  <li>Fix + CPU regression tests: <a href="https://github.com/vllm-project/vllm/pull/48438">vllm#48438</a>, under review, now covering the original two sites plus all eight siblings at the maintainer's request. The validation script is inline in the PR description; the per-site matrix is in <a href="https://github.com/vllm-project/vllm/pull/48438#issuecomment-4954339167">the validation comment</a>.</li>
+  <li>Context: <a href="https://github.com/vllm-project/vllm/issues/48312">RFC #48312</a>, the RL weight-reload correctness campaign this slots into. The Machete finding is reported there as a new row, and the registry test lives on <a href="https://github.com/RyanClark2k/vllm/blob/reload-storage-stability-test/tests/model_executor/model_loader/test_post_load_storage_stability.py">a demo branch</a> pending the maintainers' appetite.</li>
+  <li>Cost of the whole investigation: two working days end to end, of which about four and a half hours of rented 4090 at $0.669/hr. Both livelocks were on the bill. Both were worth it.</li>
 </ul>
 
 <div class="footer">

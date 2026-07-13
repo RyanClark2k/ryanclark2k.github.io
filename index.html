@@ -48,7 +48,7 @@
   <li>
     <h2><a href="./vllm-marlin-reload.html">A passing test, a stale pointer, and a GPU pinned at 100%</a></h2>
     <p class="meta">July 2026</p>
-    <p class="hook">A pointer-identity bug hunt in vLLM's RL weight-reload path (<a href="https://github.com/vllm-project/vllm/pull/48438">PR #48438</a>, under review). The obvious A/B test passes on the broken code. An instrumented probe shows <strong>88/88</strong> runtime tensors rebinding under captured CUDA graphs, then supplies the allocation pressure that hangs the GPU at 100% for ten minutes on a generation that took 1.2 s before the reload. With an audit of eight sibling sites and two retractions of my own findings.</p>
+    <p class="hook">A pointer-identity bug hunt in vLLM's RL weight-reload path (<a href="https://github.com/vllm-project/vllm/pull/48438">PR #48438</a>, under review). The obvious A/B test passes on the broken code. An instrumented probe shows <strong>88/88</strong> runtime tensors rebinding under captured CUDA graphs, then supplies the allocation pressure that hangs the GPU at 100% for ten minutes on a generation that took 1.2 s before the reload. With an audit of eight sibling sites (all since fixed and live-validated, two of them via a synthesized 2&nbsp;MB checkpoint), two retractions of my own findings, and a registry-wide version of the test that caught the same bug class in a second kernel on its first run.</p>
   </li>
 
   <li>
