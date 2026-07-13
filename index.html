@@ -46,6 +46,12 @@
 <ul class="posts">
 
   <li>
+    <h2><a href="./vllm-marlin-reload.html">A passing test, a stale pointer, and a GPU pinned at 100%</a></h2>
+    <p class="meta">July 2026</p>
+    <p class="hook">A pointer-identity bug hunt in vLLM's RL weight-reload path (<a href="https://github.com/vllm-project/vllm/pull/48438">PR #48438</a>, under review). The obvious A/B test passes on the broken code. An instrumented probe shows <strong>88/88</strong> runtime tensors rebinding under captured CUDA graphs, then supplies the allocation pressure that hangs the GPU at 100% for ten minutes on a generation that took 1.2 s before the reload. With an audit of eight sibling sites and two retractions of my own findings.</p>
+  </li>
+
+  <li>
     <h2><a href="./thaw.html">thaw: snapshotable gVisor for sub-second cold starts</a></h2>
     <p class="meta">May 2026</p>
     <p class="hook">A from-scratch implementation of Modal's snapshot-restore model on top of gVisor, with the full substrate underneath: content-addressed image format, unified blob store, custom lazy FUSE, thin scheduler, and a Modal-shaped Python SDK. Real workload (resnet50 on a 661 KB JPEG): cold p50 <strong>774 ms</strong>, warm <strong>125 ms</strong>; <code>runsc restore</code> itself was ~280 ms at every stage. The interesting parts are the things that didn't work the first time.</p>

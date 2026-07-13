@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A passing test, a stale pointer, and a GPU pinned at 100% — Ryan Clark</title>
+<style>
+  :root {
+    --bg: #fdfcf9;
+    --text: #1f1f1f;
+    --muted: #6b6b6b;
+    --accent: #b34c2c;
+    --rule: #e3ddd0;
+    --code-bg: #f3efe7;
+    --table-alt: rgba(243, 239, 231, 0.55);
+    --callout-bg: #fff8ed;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Charter', 'Iowan Old Style', 'Georgia', 'Times New Roman', serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+    font-size: 18px;
+  }
+  h1, h2, h3, h4, .sans { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', sans-serif; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }
+  h1 { font-size: 2.05rem; margin: 0 0 0.4rem; }
+  .subtitle { color: var(--muted); font-size: 1.12rem; font-style: italic; margin: 0 0 1.5rem; line-height: 1.45; }
+  .meta { color: var(--muted); font-size: 0.92rem; border-bottom: 1px solid var(--rule); padding-bottom: 1rem; margin-bottom: 2.5rem; font-family: -apple-system, sans-serif; }
+  .meta a { color: var(--muted); }
+  h2 { font-size: 1.45rem; margin-top: 3rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; margin-top: 2rem; color: #2a2a2a; }
+  p { margin: 1rem 0; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(179, 76, 44, 0.3); }
+  a:hover { border-bottom-color: var(--accent); }
+  .tldr { background: var(--callout-bg); border-left: 3px solid var(--accent); padding: 1rem 1.25rem; margin: 1.5rem 0 2.5rem; font-size: 1rem; }
+  .tldr p { margin: 0.4rem 0; }
+  .tldr-label { display: block; font-family: -apple-system, sans-serif; font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.3rem; font-weight: 600; }
+  code { font-family: 'Menlo', 'Monaco', 'Consolas', monospace; font-size: 0.88em; background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.88rem; line-height: 1.5; }
+  pre code { background: transparent; padding: 0; font-size: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 1.5rem 0; font-size: 0.9rem; font-family: -apple-system, sans-serif; }
+  th, td { padding: 0.55rem 0.7rem; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { background: var(--table-alt); font-weight: 600; border-bottom: 1px solid #c8c1b1; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:nth-child(even) td { background: var(--table-alt); }
+  .pos { color: #2c7a4d; font-weight: 600; }
+  .neg { color: #c8442a; font-weight: 600; }
+  .callout { border: 1px solid var(--rule); border-radius: 4px; padding: 0.9rem 1.1rem; margin: 1.25rem 0; font-size: 0.97rem; background: rgba(243, 239, 231, 0.45); }
+  blockquote { border-left: 3px solid var(--rule); margin: 1.25rem 0; padding: 0.2rem 0 0.2rem 1rem; color: var(--muted); font-style: italic; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 0.4rem 0; }
+  .footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); font-family: -apple-system, sans-serif; font-size: 0.88rem; color: var(--muted); }
+  .footer a { color: var(--muted); }
+  .nav-back { font-family: -apple-system, sans-serif; font-size: 0.88rem; margin-bottom: 2rem; }
+  .nav-back a { color: var(--muted); border-bottom: 1px solid transparent; }
+  .nav-back a:hover { border-bottom-color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="nav-back"><a href="./index.html">← all posts</a></div>
+
+<h1>A passing test, a stale pointer, and a GPU pinned at 100%</h1>
+<p class="subtitle">Debugging pointer identity in vLLM's RL weight-reload path: why the obvious test passes on broken code, the instrument that caught it, and the livelock that confirmed it harder than I intended.</p>
+<p class="meta">Ryan Clark · July 2026 · <a href="https://github.com/vllm-project/vllm/pull/48438">PR #48438</a> (under review)</p>
+
+<div class="tldr">
+  <span class="tldr-label">TL;DR</span>
+  <p>RL training frameworks push fresh weights into a live vLLM engine every step. CUDA graphs bake device pointers at capture time. vLLM's reload machinery preserves storage addresses for registered parameters and buffers, and silently protects nothing else. Marlin's quantized-GEMM kernel keeps two runtime tensors outside that protection: a workspace on the kernel object and, for act-order GPTQ, the <code>g_idx_sort_indices</code> permutation. After one reload, every captured graph is reading freed memory. The obvious A/B test (generate, reload identical weights, generate, compare) <strong>passes on the broken code</strong>, because stale memory still holds bit-identical values until something reclaims it. An instrumented test caught it: 88/88 tensor addresses move on reload on main, and a write-to-live-state probe shows the graphs ignore the tensors the engine believes it has. Then the probe's own temporary allocations reclaimed the freed workspace blocks and the next generation, 1.2 s before the reload, spun the GPU at 100% for ten minutes. Fix is ~30 lines; the same audit found the pattern at eight more sites and retracted two of my own claims along the way. Total GPU bill: under $2 of rented 4090.</p>
+</div>
+
+<h2>The setup: weight reloads under CUDA graphs</h2>
+
+<p>vLLM has a code path that RL frameworks exercise constantly and almost nobody else touches. During policy training, the rollout engine has to receive updated weights after every optimizer step without tearing the engine down: TRL, verl, SkyRL and the rest all call some flavor of <code>reload_weights</code> on a running engine. This is also the path where CUDA graphs make everything harder. A captured graph does not run your Python. It replays a recorded sequence of kernel launches with every device address baked in at capture time. Your Python objects can rebind, reallocate, and drift; the captured graph keeps launching against the addresses it saw on capture day.</p>
+
+<p>vLLM's reload machinery (<code>model_loader/reload/layerwise.py</code>) knows this. After reprocessing a layer's weights it copies the recomputed values back into the <em>original</em> tensor storage, so the pointers the graphs captured stay valid. The docstring on the helper spells out the invariant: preserving <code>data_ptr</code> is required for captured CUDA graphs to remain valid across weight updates. There is one catch, and the whole bug lives inside it: the copy-back walks <code>layer._parameters</code> and <code>layer._buffers</code>. A tensor that is not registered in one of those two dicts gets no protection at all.</p>
+
+<p>The vLLM RL working group had been auditing exactly this class of bug (<a href="https://github.com/vllm-project/vllm/issues/48312">RFC #48312</a>, "Weight Reload Correctness for RL"), and their table of unverified candidates listed the Marlin kernel's workspace as a suspect. I picked up that row. Marlin is the mixed-precision GEMM kernel behind GPTQ, AWQ, and several FP8/FP4 fallbacks, so anyone doing RL on a quantized policy with CUDA graphs enabled (the default) is standing on this path.</p>
+
+<h2>Finding it on paper</h2>
+
+<p>Reading <code>MarlinLinearKernel.process_weights_after_loading</code> against the reload machinery, two tensors escape the protected set.</p>
+
+<p>The first is the workspace. Marlin allocates a small scratch buffer for cross-block synchronization counters and stores it as <code>self.workspace</code> on the kernel object. A kernel object is a plain Python class. It has no <code>_parameters</code> dict, no module registry, no path by which the copy-back could ever learn the tensor exists. Reprocessing allocates a fresh workspace, the old one's refcount drops to zero, and the allocator gets the block back. The captured graphs keep the address.</p>
+
+<p>The second is act-order specific. GPTQ with <code>desc_act=true</code> sorts weight groups by activation order, and the kernel needs the sort permutation at inference time. The code computes it with <code>torch.argsort</code> and assigns it with <code>layer.g_idx_sort_indices = g_idx_sort_indices</code>. Here is the detail that makes this whole bug class slippery: whether that line registers anything depends on the type of the right-hand side. <code>nn.Module.__setattr__</code> intercepts <code>nn.Parameter</code> assignments and registers them; a plain tensor lands as an ordinary object attribute and the registry never hears about it. <code>argsort</code> returns a plain tensor. One line away, the non-act-order path assigns <code>marlin_make_empty_g_idx(device)</code>, which returns an <code>nn.Parameter</code>, so that path auto-registers and is fine. Two assignments that look interchangeable in a diff, with different runtime lifecycle semantics, decided by a return type three calls away.</p>
+
+<p>The workspace is write-only scratch, so its failure mode is corrupting whatever tensor the allocator hands the block to next. The permutation is worse in a quieter way: the kernel <em>reads</em> it, so stale or reclaimed memory there means wrong outputs with no error anywhere.</p>
+
+<p>The fix follows the invariant the machinery already states: recompute values into the same storage. About 30 lines total, following the pattern of a sibling fix in the same RFC campaign. The sort indices go through <code>replace_parameter(..., prefer_copy=True)</code>, which both copies in place and registers the tensor so the copy-back protects it from then on. The workspace gets an <code>existing</code> argument on its factory function: reuse compatible storage, zero it, return it. A CPU unit test pins both invariants with <code>data_ptr</code> assertions, needs no GPU (the two CUDA-only ops are monkeypatched), and fails on main exactly where it should. So far, a tidy afternoon.</p>
+
+<h2>The GPU test that passed when it should have failed</h2>
+
+<p>Static analysis plus a unit test is an argument. I wanted the bug demonstrated in a real engine with real captured graphs before claiming it, so I rented a 4090 on Vast for $0.669/hr and wrote the obvious end-to-end check: load an act-order GPTQ model (TinyLlama, <code>desc_act=true</code>, all 88 linear modules on the Marlin act-order path), CUDA graphs at defaults, generate greedily on 8 prompts, reload identical weights through the real RL path, generate again, compare token ids. Broken code should diverge.</p>
+
+<pre><code>[ok  ] prompt 0: 'The capital of France is'
+[ok  ] prompt 1: 'In machine learning, overfitting means'
+...
+RESULT: PASS (all generations identical after reload)</code></pre>
+
+<p>That is the unfixed code passing the test that its bug is supposed to fail. It took me a minute to believe it, and most of an hour to fully explain it. Three separate effects were covering for the bug:</p>
+
+<ul>
+  <li><strong>Identical weights mean identical stale values.</strong> The reload loaded the same checkpoint, so the freed memory the graphs were reading held bit-for-bit the same permutation the fresh tensors held. A stale read of correct values is indistinguishable from a correct read. With changed weights (which is the entire point of RL) this masker disappears, but a same-weights test can never see it.</li>
+  <li><strong>Nothing had reclaimed the freed blocks.</strong> Freed memory keeps its contents until the allocator reuses it. My test did some churn allocations after the reload, and the caching allocator served them from elsewhere.</li>
+  <li><strong>Prefix caching was quietly helping.</strong> Same prompts before and after the reload meant part of the second generation was served from KV cache computed before the reload ever happened.</li>
+</ul>
+
+<p>The general statement, and the thing I will carry to other systems: a memory-identity bug with value-identical contents is invisible to output comparison <em>by construction</em>. Absence of divergence tells you nothing. This is presumably exactly why the bug survived in tree: any reasonable smoke test of the reload path reloads the same weights and compares, and it passes every time.</p>
+
+<h2>An instrument that can't be fooled</h2>
+
+<p>The fix for a test that can be fooled is to test the invariant instead of the symptom. Two probes, neither of which depends on allocator luck:</p>
+
+<p><strong>Pointer census.</strong> vLLM's <code>llm.apply_model</code> runs a function against the live model inside the engine. Walk the modules, record <code>data_ptr()</code> for every Marlin workspace and every sort-indices tensor, reload, record again. The graphs baked the before-pointers; if the after-pointers differ, the graphs are provably reading memory the engine no longer owns, whatever the contents happen to be.</p>
+
+<p><strong>The flip.</strong> Proving the graph reads freed memory directly is awkward. Proving the graph <em>ignores the live tensor</em> is easy: write to it and see if anything changes. After the reload, reverse every live sort-indices permutation in place (reversed indices are still in range, so this is memory-safe, just numerically wrong) and generate again. On correct code the graphs read the storage the engine just mutated, so generations must change. On broken code the graphs read the old memory and the flip is a no-op. The probe is symmetric: it produces a positive signal in both the healthy and the broken case, just opposite ones. There is no analogous probe for the workspace, and the reason is instructive: sort indices have legitimately-shaped wrong values you can write, while any nonzero value in a sync-counter buffer is garbage, and on the <em>fixed</em> code the graph reads the live workspace by design, so poisoning it breaks the healthy configuration too. The workspace gets the pointer census only.</p>
+
+<p>On main:</p>
+
+<pre><code>pointer identity after reload: 88/88 workspaces moved, 88/88 sort indices moved
+flipped 88 live sort-indices tensors in place</code></pre>
+
+<p>Every single tracked tensor rebound. And then the run stopped producing output.</p>
+
+<h2>The livelock</h2>
+
+<p>The generation after the flip had taken 1.2 seconds before the reload. Ten minutes later the log had not advanced and <code>nvidia-smi</code> read 100% utilization, 22 GB resident, no errors. I killed it after confirming it was not merely slow.</p>
+
+<p>The failure signature does the diagnosis for you, which is the part of this story I enjoy most. If the graphs had been reading garbage <em>permutations</em>, the outcome would be wrong tokens or an illegal memory access, and either of those terminates. An infinite spin at full utilization is a thread waiting on a condition that will never come true. Marlin's workspace holds cross-block synchronization counters; the kernel spins until a counter reaches its expected value. Garbage counters, infinite spin. And where did the garbage come from? The flip itself. <code>tensor.flip(0)</code> allocates a temporary per layer, 88 of them, and the caching allocator served those temporaries out of the freed workspace blocks, filling the memory the captured graphs were about to read with permutation indices. The probe I built to detect the sort-indices half of the bug supplied the allocation pressure that detonated the workspace half.</p>
+
+<p>I will take it. In an actual RL run this is the difference between a metrics blip and a rollout fleet that stops making progress at full power draw, with nothing in any log. The naive test says the code is fine. The instrumented test hangs the GPU.</p>
+
+<p>On the fixed branch, the same script, same model, same everything:</p>
+
+<pre><code>pointer identity after reload: 0/88 workspaces moved, 0/88 sort indices moved
+flipped 88 live sort-indices tensors in place
+generations changed after live flip: 8/8
+VERDICT: FIXED - storage identity preserved across reload; captured graphs read live storage</code></pre>
+
+<p>Addresses stable, and the flip lands: the graphs are demonstrably coupled to the storage the engine mutates. One commit of difference between this block and the livelock.</p>
+
+<h2>Auditing my own claim</h2>
+
+<p>While reading the code I had noticed the same unregistered-workspace pattern at what looked like ten more sites across the Marlin family: the FP8 and FP4 fallback paths, several MoE variants, AWQ and GPTQ MoE. I posted that as a finding. Then, since the 4090 was still rented, I tested it, and the claim did not survive contact intact.</p>
+
+<table>
+  <thead>
+    <tr><th>site</th><th>verdict</th><th>how</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>FP8 dense Marlin (<code>marlin_utils_fp8.py:135</code>)</td><td><span class="neg">rebinds, 88/88</span></td><td>live: online-FP8 TinyLlama; this is the default path on GPUs without native FP8</td></tr>
+    <tr><td>NVFP4 dense fallback (<code>marlin_utils_fp4.py:243</code>)</td><td><span class="neg">rebinds, 88/88</span></td><td>live: NVFP4 TinyLlama; default path on pre-Blackwell hardware</td></tr>
+    <tr><td>FP8 Marlin MoE (<code>marlin_utils_fp8.py:283</code>)</td><td><span class="neg">rebinds, 6/6</span></td><td>live: a tiny <em>random-weight</em> Mixtral. A pointer census doesn't care if the model is any good; it needs the architecture, not the training</td></tr>
+    <tr><td>MXFP8 + FP4 MoE + one conditional (5 sites)</td><td>static only</td><td>the exercising checkpoints are tens of GB or barely exist publicly</td></tr>
+    <tr><td>AWQ MoE (<code>auto_awq.py:664</code>)</td><td><span class="pos">retracted</span></td><td>workspace assigned in <code>create_weights</code>, which never re-runs on reload</td></tr>
+    <tr><td>GPTQ MoE (<code>auto_gptq.py:651</code>)</td><td><span class="pos">retracted</span></td><td>same</td></tr>
+  </tbody>
+</table>
+
+<p>The retractions came from a distinction my first pass glossed over: <em>where</em> the assignment lives decides everything. A workspace assigned in <code>create_weights</code> is assigned once, at model construction, and reload never touches it; the identical-looking line inside <code>process_weights_after_loading</code> re-runs on every reload. Ten shrank to eight, three of the eight are now demonstrated in a live engine, and I posted the corrections in the same thread as the original claim. Testing your own findings before someone else does is cheap. Doing it while the GPU is already rented is nearly free.</p>
+
+<p>One trick from this phase worth keeping: <code>VLLM_TEST_FORCE_FP8_MARLIN=1</code> plus on-the-fly FP8 quantization of a small bf16 model reaches the FP8 Marlin paths on hardware that would otherwise route elsewhere, and a random-weight architecture clone (<code>dacorvo/Mixtral-tiny</code>) reaches the MoE machinery for pennies. Lifecycle bugs don't need good models to reproduce.</p>
+
+<h2>What I'm taking away</h2>
+
+<ul>
+  <li><strong>Test the invariant, not the symptom.</strong> The invariant was pointer identity. Output comparison is a symptom check, and for this bug class the symptom is masked by value-identical stale memory, allocator behavior, and caching, each of which independently makes broken code look healthy.</li>
+  <li><strong>Write-to-live-state probes are strong discriminators.</strong> "Does the system observe a mutation it should observe" gives a positive signal in both directions and doesn't depend on winning races with the allocator.</li>
+  <li><strong>Failure signatures carry the diagnosis.</strong> Wrong tokens, illegal access, and infinite spin implicate different tensors. The livelock pointed at sync counters before I looked at a single line of kernel code.</li>
+  <li><strong>Registration semantics are a bug surface.</strong> <code>module.attr = tensor</code> and <code>module.attr = Parameter(tensor)</code> diverge silently in every system that walks the module registry: reload, state_dict, device moves. The type of the right-hand side is doing invisible work.</li>
+  <li><strong>Latent bugs live where the naive test passes.</strong> This one sat on a heavily-used path precisely because every reasonable smoke test of that path is naive in the specific way that hides it.</li>
+</ul>
+
+<h2>Status &amp; artifacts</h2>
+
+<ul>
+  <li>Fix + CPU regression test: <a href="https://github.com/vllm-project/vllm/pull/48438">vllm#48438</a>, under review. The validation script is inline in the PR description; it runs on any SM75+ GPU in about five minutes.</li>
+  <li>Context: <a href="https://github.com/vllm-project/vllm/issues/48312">RFC #48312</a>, the RL weight-reload correctness campaign this slots into. A follow-up PR sweeping the remaining sibling sites is scoped and pending a maintainer's preference on packaging.</li>
+  <li>Cost of the whole investigation: one working day end to end, of which about two hours of rented 4090 at $0.669/hr. The livelock was the single largest line item on the GPU bill, and worth every cent.</li>
+</ul>
+
+<div class="footer">
+  Ryan Clark · <a href="./index.html">all posts</a>
+</div>
+
+</body>
+</html>
